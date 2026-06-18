@@ -1,0 +1,1332 @@
+import unicodedata  # Pre-load to prevent Windows DLL search path conflicts with Qt/OpenGL
+import sys
+import os
+import h5py
+import numpy as np
+import importlib
+from collections import deque
+import math
+from vispy import scene, app
+from PyQt6 import QtWidgets, QtCore
+import SSN_Config as cfg
+import SSN_Utils as utils
+import Command_Engine
+
+# =========================================================================
+# MANUAL CUSTOM ATTRIBUTES INITIALIZATION SECTION
+# Users can add custom attributes to be initialized on the viewer at startup
+# and registered for layout cache saving/loading.
+# Format: "attribute_name": default_value (e.g. "my_scores": None)
+# =========================================================================
+CUSTOM_ATTRIBUTES_INIT = {
+    # Add your custom attributes here:
+}
+
+# Fix High-DPI scaling
+os.environ["QT_API"] = "pyqt6"
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+
+class MainViewer:
+    def __init__(self):
+        # --- 1. Viewer State ---
+        self.console_mode = False
+        self.input_buffer = ""
+        self.cursor_pos = 0       # Tracks cursor position
+        
+        # ---> Persistent Command History (Per Layout) <---
+        self.command_history = []
+        try:
+            cache_path, _ = utils.get_cache_filename()
+            # Extract the parent folder name to share history across all _ver.XX versions
+            folder_name = os.path.basename(os.path.dirname(cache_path))
+            history_filename = f"{folder_name}.txt"
+            
+            # ---> NEW: Fetch the directory from Config <---
+            history_dir = getattr(cfg, 'HISTORY_DIR', os.path.join("Cache_Files", "History"))
+            self.history_file = os.path.join(history_dir, history_filename)
+            
+            if os.path.exists(self.history_file):
+                with open(self.history_file, "r", encoding="utf-8") as f:
+                    self.command_history = [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            print(f"Warning: Could not bind specific history file ({e}). Defaulting format.")
+            history_dir = getattr(cfg, 'HISTORY_DIR', os.path.join("Cache_Files", "History"))
+            self.history_file = os.path.join(history_dir, "command_history.txt")
+
+        self.history_index = len(self.command_history)
+        
+        self.cluster_labels = None
+        self.label_visuals = []
+        
+
+        self.full_headers = [] # Original headers (for caching/integrity)
+
+        
+        self.original_seqs = None       
+        self.last_cluster_params = None 
+        
+        # Alignment Data 
+        self.active_reference = cfg.ALIGNMENT_REFERENCE
+        self.alignment = None
+        self.col_to_label = None  
+        self.label_to_col = None  
+        
+        # ---> NEW: Selection & Drag State <---
+        self.selected_indices = []
+        self.is_box_selecting = False
+        self.is_multi_dragging = False
+        self.drag_start_mouse = None
+        self.drag_start_nodes_pos = None
+        self.position_history = []  # Tracks states for Undo
+
+        # --- 2. Data Loading & Simulation ---
+        self.load_and_simulate()
+        self.original_pos = self.pos.copy()  # <--- NEW: Backup original layout
+        self.load_global_alignment()
+        
+        # --- 3. Setup Window & Canvas ---
+        self.canvas = scene.SceneCanvas(keys=None, show=True, title="SSN Viewer (Live)", bgcolor='white')
+        self.canvas.events.key_press.connect(self.on_key_press)
+        self.canvas.events.resize.connect(self.on_resize)
+        self.canvas.events.mouse_press.connect(self.on_mouse_press)
+        
+        # --- NEW: Hook mouse wheel and move for dynamic tooltips and HUD ---
+        self.canvas.events.mouse_wheel.connect(self.on_mouse_wheel)
+        self.canvas.events.mouse_move.connect(self.on_mouse_move)
+        
+        self.selected_node_idx = None
+        # Rename the timer so it handles all dynamic HUD elements
+        self._hud_timer = app.Timer(0.001, connect=self._update_hud_elements, iterations=1)
+        
+        self.view = self.canvas.central_widget.add_view()
+        self.view.camera = 'panzoom' 
+        self.view.camera.aspect = 1
+        
+        # --- Disable default Vispy Backspace reset ---
+        # Save the original bound method
+        self._original_camera_key_event = self.view.camera.viewbox_key_event
+        
+        # Create a custom wrapper that filters out Backspace
+        def safe_camera_key_event(event):
+            if event.key == 'Backspace':
+                return  # Block the event from reaching the camera
+            self._original_camera_key_event(event)
+            
+        # Replace the camera's handler with our custom wrapper
+        self.view.camera.viewbox_key_event = safe_camera_key_event
+
+        # ---> NEW: Disable default Vispy Right-Click Zoom <---
+        self._original_camera_mouse_event = self.view.camera.viewbox_mouse_event
+        
+        def safe_camera_mouse_event(event):
+            # If the event involves the right mouse button (button 2), block it from the camera
+            if getattr(event, 'button', None) == 2 or 2 in getattr(event, 'buttons', []):
+                return 
+            self._original_camera_mouse_event(event)
+            
+        self.view.camera.viewbox_mouse_event = safe_camera_mouse_event
+
+        # --- 4. Draw Initial State ---
+        self.draw_network()
+        self.create_hud()
+        
+        # 1. Find the extreme coordinates of the final grid
+        min_x, min_y = np.min(self.pos[:, :2], axis=0)
+        max_x, max_y = np.max(self.pos[:, :2], axis=0)
+        
+        # 2. Calculate dimensions
+        width = max_x - min_x
+        height = max_y - min_y
+        
+        # 3. Add a 5% padding margin (or at least 10 units) so nodes don't touch the window edge
+        margin_x = max(width * 0.05, 10.0)
+        margin_y = max(height * 0.05, 10.0)
+        
+        # 4. Snap the camera to this precise rectangle
+        self.view.camera.set_range(
+            x=(min_x - margin_x, max_x + margin_x), 
+            y=(min_y - margin_y, max_y + margin_y)
+        )
+        
+        # --- 5. Setup Similarity / E-value Slider Bar ---
+        self.is_evalue = getattr(cfg, 'INPUT_IS_EVALUE', False)
+        
+        min_val = getattr(cfg, 'SIMILARITY_THRESHOLD', None)
+        if min_val is None or min_val == "None":
+            if hasattr(self, 'edge_scores') and len(self.edge_scores) > 0:
+                min_val = float(np.min(self.edge_scores))
+            else:
+                min_val = 0.0
+        self.min_threshold = float(min_val)
+        
+        if hasattr(self, 'edge_scores') and len(self.edge_scores) > 0:
+            self.max_threshold = float(np.max(self.edge_scores))
+        else:
+            self.max_threshold = self.min_threshold + 1.0
+            
+        if self.min_threshold >= self.max_threshold:
+            self.max_threshold = self.min_threshold + 1.0
+            
+        self.current_slider_threshold = self.min_threshold
+
+        # Create overlay container widget as a child of the native canvas
+        self.slider_overlay = QtWidgets.QWidget(self.canvas.native)
+        self.slider_overlay.setObjectName("sliderOverlay")
+        
+        overlay_layout = QtWidgets.QHBoxLayout(self.slider_overlay)
+        overlay_layout.setContentsMargins(5, 5, 5, 5)
+        overlay_layout.setSpacing(10)
+        
+        self.slider_label = QtWidgets.QLabel()
+        self.slider_label.setObjectName("sliderLabel")
+        self.slider_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self.update_slider_label_text(self.current_slider_threshold)
+        
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.slider.setRange(0, 1000)
+        self.slider.setValue(0)
+        self.slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.slider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        self.slider.setTickInterval(100)
+        self.slider.valueChanged.connect(self.on_slider_value_changed)
+        
+        overlay_layout.addWidget(self.slider_label)
+        overlay_layout.addWidget(self.slider)
+        
+        # Style sheet matching the third image
+        self.slider_overlay.setStyleSheet("""
+            QWidget#sliderOverlay {
+                background: transparent;
+            }
+            QLabel#sliderLabel {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                font-size: 12pt;
+                font-weight: normal;
+                color: gray;
+                background: transparent;
+                min-width: 45px;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #bcbcbc;
+                height: 4px;
+                background: #d8d8d8;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #3A96A6;
+                border: 1px solid #2E8B9A;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 1px solid #bcbcbc;
+                width: 14px;
+                height: 16px;
+                margin-top: -6px;
+                margin-bottom: -6px;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #f5f5f5;
+                border-color: #a0a0a0;
+            }
+            QSlider::handle:horizontal:pressed {
+                background: #e5e5e5;
+                border-color: #888888;
+            }
+        """)
+        
+        self.position_slider_overlay()
+        self.slider_overlay.show()
+        
+        self._hud_timer.start()
+        print("\nViewer Ready. Press [ENTER] to type commands.")
+
+    def _update_console_text(self):
+        """Helper to render the command line with a visible cursor."""
+        buf = self.input_buffer
+        c = self.cursor_pos
+        self.console_text.text = f"Cmd: {buf[:c]}_{buf[c:]}"
+        self.canvas.update()
+
+    def load_and_simulate(self):
+            """
+            Loads layout. Saves original headers to cache, but uses simplified headers in memory.
+            """
+            if not os.path.exists(cfg.SAVED_LAYOUT_DIR):
+                os.makedirs(cfg.SAVED_LAYOUT_DIR)
+                
+            # --- Resolve Path and Header ---
+            cache_path, self.resolved_ref_full = utils.get_cache_filename()
+            print(f"Target Cache File: {cache_path}")
+            
+            raw_loaded = False
+
+            # --- Try Loading Cache ---
+            if os.path.exists(cache_path):
+                print(f"--- Found Cached Layout! ---")
+                try:
+                    import json
+                    with h5py.File(cache_path, "r") as hf:
+                        raw_headers = hf["headers"][:]
+                        self.full_headers = [h.decode('utf-8') if isinstance(h, bytes) else h for h in raw_headers]
+                        self.pos = hf["positions"][:].astype(np.float32)
+                        
+                        self.n_nodes = len(self.full_headers)
+                        
+                        if "colors" in hf: self.current_colors = hf["colors"][:]
+                        if "sizes" in hf: self.current_sizes = hf["sizes"][:]
+                        if "shapes" in hf:
+                            raw_shapes = hf["shapes"][:]
+                            self.current_shapes = np.array([s.decode('utf-8') if isinstance(s, bytes) else s for s in raw_shapes], dtype=object)
+                        if "visible_mask" in hf: self.visible_mask = hf["visible_mask"][:]
+                        if "cluster_labels" in hf: self.cluster_labels = hf["cluster_labels"][:]
+                        
+                        # --- Load Metadata from Cache ---
+                        self.metadata = {}
+                        if "metadata" in hf:
+                            meta_group = hf["metadata"]
+                            for prop_name in meta_group.keys():
+                                ds = meta_group[prop_name]
+                                prop_type = ds.attrs.get("type", "text")
+                                raw_vals = ds[:]
+                                if prop_name == "Length":
+                                    values = raw_vals.astype(np.int32)
+                                elif prop_type == "number":
+                                    values = raw_vals.astype(np.float64)
+                                else:
+                                    values = np.array([v.decode('utf-8') if isinstance(v, bytes) else str(v) for v in raw_vals], dtype=object)
+                                self.metadata[prop_name] = {
+                                    "type": prop_type,
+                                    "values": values
+                                }
+                                
+                        # --- Load Custom Dynamic Attributes from Cache (Root Level) ---
+                        if not hasattr(self, '_cacheable_attrs'):
+                            self._cacheable_attrs = set()
+                        
+                        # Register manually configured attributes
+                        for attr_name in CUSTOM_ATTRIBUTES_INIT.keys():
+                            self._cacheable_attrs.add(attr_name)
+                            
+                        # Scan root-level keys for any non-core custom datasets
+                        CORE_DATASETS = {
+                            "headers", "positions", "colors", "sizes", "shapes", 
+                            "visible_mask", "cluster_labels", "group_labels", "metadata",
+                            "connectivity", "edge_scores"
+                        }
+                        for key in hf.keys():
+                            if key not in CORE_DATASETS:
+                                ds = hf[key]
+                                if "is_json" in ds.attrs and ds.attrs["is_json"]:
+                                    import json
+                                    raw_val = ds[()]
+                                    if isinstance(raw_val, bytes):
+                                        raw_val = raw_val.decode('utf-8')
+                                    setattr(self, key, json.loads(raw_val))
+                                else:
+                                    setattr(self, key, ds[:])
+                                self._cacheable_attrs.add(key)
+                        
+                        # --- Safely decode strings/bytes ---
+                        if "group_labels" in hf:
+                            gl_data = hf["group_labels"][()]
+                            if isinstance(gl_data, bytes):
+                                gl_data = gl_data.decode('utf-8')
+                            self.group_labels = [set(g) for g in json.loads(gl_data)]
+                            
+                        if "last_cluster_params" in hf.attrs: 
+                            val = hf.attrs["last_cluster_params"]
+                            if isinstance(val, bytes): val = val.decode('utf-8')
+                            if isinstance(val, str) and val.startswith('['):
+                                self.last_cluster_params = tuple(json.loads(val))
+                            else:
+                                self.last_cluster_params = tuple(val)
+                                
+                    # Freshly load connectivity and edge scores from selected network file
+                    print("Fetching fresh connectivity and edge scores from raw network file...")
+                    try:
+                        with h5py.File(cfg.INPUT_HDF5, "r") as raw_data:
+                            raw_headers, raw_edges, raw_edge_scores, _, _ = utils.build_network_from_raw(
+                                raw_data, 
+                                forced_ref_header=self.resolved_ref_full
+                            )
+                        
+                        # Robustly map raw_edges to the cached headers
+                        raw_to_idx = {h: idx for idx, h in enumerate(raw_headers)}
+                        cached_to_idx = {h: idx for idx, h in enumerate(self.full_headers)}
+                        
+                        mapped_edges = []
+                        mapped_scores = []
+                        for edge_idx, (u, v) in enumerate(raw_edges):
+                            u_header = raw_headers[u]
+                            v_header = raw_headers[v]
+                            u_cached = cached_to_idx.get(u_header)
+                            v_cached = cached_to_idx.get(v_header)
+                            if u_cached is not None and v_cached is not None:
+                                mapped_edges.append([u_cached, v_cached])
+                                mapped_scores.append(raw_edge_scores[edge_idx])
+                        
+                        self.edges = np.array(mapped_edges, dtype=np.int32) if mapped_edges else np.zeros((0, 2), dtype=np.int32)
+                        self.edge_scores = np.array(mapped_scores, dtype=np.float32) if mapped_scores else np.zeros(0, dtype=np.float32)
+                    except Exception as e:
+                        print(f"Warning: Failed to load raw connectivity/scores from network file: {e}")
+                        # Fallback: if connectivity was in older cache file, load it
+                        with h5py.File(cache_path, "r") as hf:
+                            if "connectivity" in hf:
+                                edges_raw = hf["connectivity"][:]
+                                self.edges = edges_raw.astype(np.int32) if len(edges_raw) > 0 else np.zeros((0, 2), dtype=np.int32)
+                            else:
+                                self.edges = np.zeros((0, 2), dtype=np.int32)
+                            
+                            if "edge_scores" in hf:
+                                self.edge_scores = hf["edge_scores"][:]
+                            else:
+                                self.edge_scores = np.zeros(0, dtype=np.float32)
+                    
+                    base_box = np.sqrt(self.n_nodes) * 2.5 + 5.0
+                    self.box_limit = base_box * cfg.BOX_SCALE
+                    
+                    print(f"Loaded {self.n_nodes} nodes and {len(self.edges)} edges.")
+                    if getattr(self, 'resolved_ref_full', None):
+                        print(f"Active Reference: {self.resolved_ref_full}")
+
+                    raw_loaded = True
+
+                except Exception as e:
+                    import traceback
+                    print(f"Error loading HDF5 cache: {e}")
+                    traceback.print_exc()
+
+            # --- Calculate from Scratch (if cache failed or missing) ---
+            if not raw_loaded:
+                # ---> FIX: Normalize the slash direction for the console output <---
+                clean_hdf5_path = os.path.normpath(cfg.INPUT_HDF5)
+                print(f"--- Calculating New Layout (Raw: {clean_hdf5_path}) ---")
+                try:
+                    with h5py.File(cfg.INPUT_HDF5, "r") as raw_data: 
+                        self.full_headers, self.edges, self.edge_scores, initial_pos, self.box_limit = utils.build_network_from_raw(
+                            raw_data, 
+                            forced_ref_header=self.resolved_ref_full
+                        )
+                except Exception as e:
+                    sys.exit(f"Error loading HDF5 file: {e}")
+                
+                self.n_nodes = len(self.full_headers)
+                print(f"Network Built: {self.n_nodes} Nodes, {len(self.edges)} Edges.")
+                
+                # --- Layout Engine Calculation ---
+                if getattr(cfg, 'UMAP_MODE', False):
+                    import Layout_Engine_UMAP as Layout_Engine
+                else:
+                    engine_style = getattr(cfg, 'PHYSICS_ENGINE', 'Molecular Dynamics (Style)')
+                    if engine_style == 'Monte Carlo (Style)':
+                        import Layout_Engine_SSN_MonteCarlo as Layout_Engine
+                    else:
+                        import Layout_Engine_SSN_MolecularDynamics as Layout_Engine
+                
+                # Construct params dictionary from cfg
+                params = {
+                    'PHYSICS_ENGINE': getattr(cfg, 'PHYSICS_ENGINE', 'Molecular Dynamics (Style)'),
+                    'BOX_SCALE': getattr(cfg, 'BOX_SCALE', 1.0),
+                    'SIMILARITY_THRESHOLD': getattr(cfg, 'SIMILARITY_THRESHOLD', 0.0),
+                    'ENABLE_PROGRESSIVE_SIMULATION': getattr(cfg, 'ENABLE_PROGRESSIVE_SIMULATION', True),
+                    'RMSD_WINDOW': getattr(cfg, 'RMSD_WINDOW', 50),
+                    'MAX_STEPS': getattr(cfg, 'MAX_STEPS', 2000),
+                    'RMSD_THRESHOLD': getattr(cfg, 'RMSD_THRESHOLD', 0.005),
+                    'PERCENTAGE_DROP_THRESHOLD': getattr(cfg, 'PERCENTAGE_DROP_THRESHOLD', 0.0),
+                    'PACKING_GRID_SIZE': getattr(cfg, 'PACKING_GRID_SIZE', 200.0),
+                    'PACKING_PADDING': getattr(cfg, 'PACKING_PADDING', 50.0),
+                    'COULOMB_CUTOFF': getattr(cfg, 'COULOMB_CUTOFF', 15.0),
+                    'COULOMB_K': getattr(cfg, 'COULOMB_K', 50.0),
+                    'MAX_FORCE_LIMIT': getattr(cfg, 'MAX_FORCE_LIMIT', 10.0),
+                    'SPRING_K': getattr(cfg, 'SPRING_K', 0.1),
+                    'DAMPING': getattr(cfg, 'DAMPING', 0.5),
+                    'DT': getattr(cfg, 'DT', 0.1),
+                    'UMAP_NEIGHBORS': getattr(cfg, 'UMAP_NEIGHBORS', 15),
+                    'UMAP_MIN_DIST': getattr(cfg, 'UMAP_MIN_DIST', 0.1),
+                    'SGLD_MIN_K': getattr(cfg, 'SGLD_MIN_K', 20),
+                    'SGLD_K_PERCENT': getattr(cfg, 'SGLD_K_PERCENT', 0.01),
+                    'SGLD_START_TEMP': getattr(cfg, 'SGLD_START_TEMP', 1.5),
+                    'SGLD_NOISE_SCALE': getattr(cfg, 'SGLD_NOISE_SCALE', 1.0)
+                }
+                
+                # Construct N x 3 connectivity table
+                if len(self.edges) > 0:
+                    connectivity = np.column_stack((self.edges, self.edge_scores))
+                else:
+                    connectivity = np.zeros((0, 3), dtype=np.float32)
+                    
+                self.pos, self.box_limit = Layout_Engine.calculate_layout(connectivity, self.n_nodes, params)
+                
+                # --- Save to Cache (Using FULL headers) ---
+                try:
+                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                    
+                    with h5py.File(cache_path, "w") as hf:
+                        dt_str = h5py.string_dtype(encoding='utf-8')
+                        hf.create_dataset("headers", data=np.array(self.full_headers, dtype=object), dtype=dt_str, compression="gzip")
+                        hf.create_dataset("positions", data=self.pos, compression="gzip")
+                        
+                        if getattr(self, 'last_cluster_params', None) is not None: hf.attrs["last_cluster_params"] = json.dumps(self.last_cluster_params)
+                        
+                    print(f"Layout saved to: {cache_path}")
+                except Exception as e:
+                    print(f"Warning: Could not save layout cache: {e}")
+
+            self._init_colors()
+
+    def _init_colors(self):
+        import matplotlib.colors as mcolors
+        
+        # Only initialize if they weren't loaded from the cache
+        if not hasattr(self, 'current_colors'):
+            n_rgba = mcolors.to_rgba(cfg.NEIGHBOR_COLOR)
+            self.current_colors = np.tile(n_rgba, (self.n_nodes, 1)).astype(np.float32)
+        if not hasattr(self, 'current_sizes'): self.current_sizes = np.full(self.n_nodes, cfg.NODE_SIZE, dtype=np.float32)
+        if not hasattr(self, 'current_shapes'): self.current_shapes = np.full(self.n_nodes, 'disc', dtype=object)
+        if not hasattr(self, 'visible_mask'): self.visible_mask = np.ones(self.n_nodes, dtype=bool)
+        if not hasattr(self, 'redo_stack'): self.redo_stack = []
+        if not hasattr(self, 'selected_indices'): self.selected_indices = []
+        if not hasattr(self, 'cluster_labels'): self.cluster_labels = None
+        if not hasattr(self, 'group_labels'): self.group_labels = [set() for _ in range(self.n_nodes)]
+        if not hasattr(self, 'metadata'): self.metadata = {}
+        
+        # Initialize Length metadata if not already loaded from cache
+        if "Length" not in self.metadata:
+            lengths_map = {}
+            fasta_path = getattr(cfg, 'NODE_FASTA_FILE', None) or getattr(cfg, 'SEQUENCES_FILE', '')
+            if fasta_path and os.path.exists(fasta_path):
+                try:
+                    from Bio import SeqIO
+                    for rec in SeqIO.parse(fasta_path, "fasta"):
+                        lengths_map[rec.id] = len(rec.seq)
+                        lengths_map[rec.description] = len(rec.seq)
+                except Exception as e:
+                    print(f"Warning: Failed to parse FASTA for sequence lengths: {e}")
+            
+            length_values = np.zeros(self.n_nodes, dtype=np.int32)
+            for i, h in enumerate(self.full_headers):
+                rec_id = h.split()[0]
+                if h in lengths_map:
+                    length_values[i] = lengths_map[h]
+                elif rec_id in lengths_map:
+                    length_values[i] = lengths_map[rec_id]
+            
+            self.metadata["Length"] = {
+                "type": "number",
+                "values": length_values
+            }
+            
+        # Reorder metadata dictionary so "Length" is the first property
+        if self.metadata and "Length" in self.metadata:
+            ordered_metadata = {"Length": self.metadata["Length"]}
+            for k, v in self.metadata.items():
+                if k != "Length":
+                    ordered_metadata[k] = v
+            self.metadata = ordered_metadata
+            
+        # Initialize Dynamic Registry
+        if not hasattr(self, '_cacheable_attrs'):
+            self._cacheable_attrs = set()
+            
+        # Initialize manual custom attributes from the top-level section
+        for attr_name, default_val in CUSTOM_ATTRIBUTES_INIT.items():
+            if not hasattr(self, attr_name):
+                setattr(self, attr_name, default_val)
+            self._cacheable_attrs.add(attr_name)
+
+    def _get_current_state(self):
+        """Helper to package the entire visual and spatial state."""
+        return {
+            'pos': self.pos.copy() if hasattr(self, 'pos') else None,
+            'visible_mask': self.visible_mask.copy() if hasattr(self, 'visible_mask') else None,
+            'colors': self.current_colors.copy() if hasattr(self, 'current_colors') else None,
+            'sizes': self.current_sizes.copy() if hasattr(self, 'current_sizes') else None,
+            'shapes': self.current_shapes.copy() if hasattr(self, 'current_shapes') else None,
+            'clusters': self.cluster_labels.copy() if getattr(self, 'cluster_labels', None) is not None else None,
+            'groups': [g.copy() for g in self.group_labels] if getattr(self, 'group_labels', None) is not None else None,
+            'last_cluster_params': self.last_cluster_params if getattr(self, 'last_cluster_params', None) is not None else None,
+            'metadata': {k: {'type': v['type'], 'values': v['values'].copy()} for k, v in self.metadata.items()} if getattr(self, 'metadata', None) else {},
+            '_custom_data': self._get_custom_attributes_snapshot()
+        }
+
+    def _apply_state(self, state):
+        """Helper to unpack a state dictionary and apply it to the viewer."""
+        if state['pos'] is not None: self.pos = state['pos'].copy()
+        if state['visible_mask'] is not None: self.visible_mask = state['visible_mask'].copy()
+        if state['colors'] is not None: self.current_colors = state['colors'].copy()
+        if state['sizes'] is not None: self.current_sizes = state['sizes'].copy()
+        if state['shapes'] is not None: self.current_shapes = state['shapes'].copy()
+        
+        if state['clusters'] is not None: 
+            self.cluster_labels = state['clusters'].copy()
+            self.last_cluster_params = state.get('last_cluster_params')
+        else:
+            self.cluster_labels = None
+            self.last_cluster_params = None
+
+        if state.get('groups') is not None:
+            self.group_labels = [g.copy() for g in state['groups']]
+        else:
+            self.group_labels = [set() for _ in range(self.n_nodes)]
+            
+        if state.get('metadata') is not None:
+            self.metadata = {k: {'type': v['type'], 'values': v['values'].copy()} for k, v in state['metadata'].items()}
+        else:
+            self.metadata = {}
+            
+        if '_custom_data' in state and state['_custom_data'] is not None:
+            self._apply_custom_attributes_snapshot(state['_custom_data'])
+            
+        # Clean up any active selections if those nodes are now hidden in this restored state
+        if hasattr(self, 'selected_indices'):
+            self.selected_indices = [i for i in self.selected_indices if self.visible_mask[i]]
+            
+        self.update_selection_visual()
+        self.update_edges()
+
+    def _get_custom_attributes_snapshot(self):
+        if not getattr(self, '_cacheable_attrs', None):
+            return {}
+        snapshot = {}
+        for attr_name in self._cacheable_attrs:
+            val = getattr(self, attr_name, None)
+            if isinstance(val, np.ndarray):
+                snapshot[attr_name] = val.copy()
+            else:
+                import copy
+                snapshot[attr_name] = copy.deepcopy(val)
+        return snapshot
+
+    def _apply_custom_attributes_snapshot(self, snapshot):
+        if not hasattr(self, '_cacheable_attrs'):
+            self._cacheable_attrs = set()
+        for attr_name, val in snapshot.items():
+            if isinstance(val, np.ndarray):
+                setattr(self, attr_name, val.copy())
+            else:
+                import copy
+                setattr(self, attr_name, copy.deepcopy(val))
+            self._cacheable_attrs.add(attr_name)
+
+    def _save_state(self):
+        """Saves current state to history and clears redo stack."""
+        self.position_history.append(self._get_current_state())
+        if len(self.position_history) > 50:
+            self.position_history.pop(0)
+        self.redo_stack.clear()
+        
+    def _do_undo(self):
+        if len(self.position_history) > 0:
+            self.redo_stack.append(self._get_current_state())
+            state = self.position_history.pop()
+            self._apply_state(state)
+            msg = "Undo successful."
+        else:
+            msg = "Nothing to undo."
+        self.console_text.text = msg
+        print(msg)
+
+    def _do_redo(self):
+        if len(self.redo_stack) > 0:
+            self.position_history.append(self._get_current_state())
+            state = self.redo_stack.pop()
+            self._apply_state(state)
+            msg = "Redo successful."
+        else:
+            msg = "Nothing to redo."
+        self.console_text.text = msg
+        print(msg)
+
+    def load_global_alignment(self):
+        """
+        Loads alignment using the new standalone Alignment_Manager.
+        """
+        import Alignment_Manager
+        self.alignment = Alignment_Manager.Alignment_Manager(cfg.MSA_FILE, full_headers=self.full_headers, active_reference=self.active_reference)
+
+
+    def draw_network(self):
+        edge_coords = []
+        if len(self.edges) > 0:
+            for u, v in self.edges:
+                edge_coords.append(self.pos[u])
+                edge_coords.append(self.pos[v])
+            if edge_coords:
+                import matplotlib.colors as mcolors
+                # Fetch custom edge color, fallback to black
+                edge_rgba = list(mcolors.to_rgba(getattr(cfg, 'EDGE_COLOR', '#000000')))
+                edge_rgba[3] = cfg.EDGE_ALPHA # Apply transparency
+                
+                self.line_visual = scene.visuals.Line(
+                    pos=np.array(edge_coords), connect='segments', 
+                    color=tuple(edge_rgba), width=cfg.EDGE_WIDTH, parent=self.view.scene
+                )
+                self.line_visual.set_gl_state('translucent', depth_test=False)
+                if getattr(cfg, 'UMAP_MODE', False):
+                    self.line_visual.visible = False
+        else:
+            self.line_visual = None
+            
+        self.markers = scene.visuals.Markers(parent=self.view.scene)
+        self.update_nodes()
+        
+        # --- MODIFIED: Parent changed to canvas.scene ---
+        self.tooltip = scene.visuals.Text(text="", color=cfg.TEXT_COLOR, pos=(0,0), anchor_x='left', font_size=cfg.TEXT_SIZE, parent=self.canvas.scene)
+
+        # ---> NEW: Visuals for Selection Feedback <---
+        self.selection_box = scene.visuals.Line(color='black', method='gl', parent=self.view.scene)
+        self.selection_box.visible = False
+        
+        self.selection_highlight = scene.visuals.Markers(parent=self.view.scene)
+        # Initialize with a single dummy point so Vispy builds the internal vertex buffers
+        self.selection_highlight.set_data(pos=np.array([[0.0, 0.0]], dtype=np.float32))
+        self.selection_highlight.set_gl_state('translucent', depth_test=False)
+        self.selection_highlight.visible = False
+
+    def update_selection_visual(self):
+        """Triggers a node update to draw selection edges and ensures the old highlight is hidden."""
+        if hasattr(self, 'selection_highlight'):
+            self.selection_highlight.visible = False
+            
+        self.update_nodes()
+        self.update_edges()
+    
+    def format_sig_figs(self, val):
+        if val == 0:
+            return "0.00"
+        try:
+            decimals = 2 - int(math.floor(math.log10(abs(val))))
+            if decimals < 0:
+                return f"{round(val, decimals):g}"
+            else:
+                return f"{val:.{decimals}f}"
+        except:
+            return f"{val:.3g}"
+
+    def update_slider_label_text(self, threshold):
+        formatted = self.format_sig_figs(threshold)
+        self.slider_label.setText(formatted)
+
+    def position_slider_overlay(self):
+        if hasattr(self, 'slider_overlay') and hasattr(self, 'canvas'):
+            canvas_w, canvas_h = self.canvas.size
+            overlay_w = max(100, canvas_w - 220)
+            overlay_h = 45
+            overlay_x = 20
+            overlay_y = canvas_h - overlay_h - 15
+            self.slider_overlay.setGeometry(overlay_x, overlay_y, overlay_w, overlay_h)
+
+    def on_slider_value_changed(self, value):
+        self.current_slider_threshold = self.min_threshold + (value / 1000.0) * (self.max_threshold - self.min_threshold)
+        self.update_slider_label_text(self.current_slider_threshold)
+        self.update_edges()
+
+    def update_edges(self):
+        """Updates the line visuals to follow nodes dynamically using fast vectorization."""
+        if getattr(self, 'line_visual', None) is not None and len(self.edges) > 0:
+            # ---> NEW: Only draw edges where BOTH connected nodes are visible and above the active slider threshold <---
+            current_slider_val = getattr(self, 'current_slider_threshold', getattr(cfg, 'SIMILARITY_THRESHOLD', 0.0))
+            current_vis_hash = (self.visible_mask.tobytes(), current_slider_val)
+            
+            if getattr(self, '_last_vis_mask_hash', None) != current_vis_hash:
+                self._last_vis_mask_hash = current_vis_hash
+                nodes_visible_mask = self.visible_mask[self.edges[:, 0]] & self.visible_mask[self.edges[:, 1]]
+                
+                if hasattr(self, 'edge_scores') and len(self.edge_scores) > 0:
+                    threshold_visible_mask = self.edge_scores >= current_slider_val
+                    valid_edges_mask = nodes_visible_mask & threshold_visible_mask
+                else:
+                    valid_edges_mask = nodes_visible_mask
+                    
+                self._cached_active_edges = self.edges[valid_edges_mask]
+                
+            active_edges = self._cached_active_edges
+            
+            # ---> NEW: In UMAP mode, only show edges connected to selected nodes <---
+            if getattr(cfg, 'UMAP_MODE', False):
+                if getattr(self, 'selected_indices', None) and len(self.selected_indices) > 0:
+                    mask_u = np.isin(active_edges[:, 0], self.selected_indices)
+                    mask_v = np.isin(active_edges[:, 1], self.selected_indices)
+                    active_edges = active_edges[mask_u | mask_v]
+                else:
+                    active_edges = np.zeros((0, 2), dtype=np.int32)
+            
+            if len(active_edges) > 0:
+                self.line_visual.visible = True
+                edge_coords = self.pos[active_edges].reshape(-1, 2)
+                self.line_visual.set_data(pos=edge_coords)
+            else:
+                self.line_visual.visible = False # Prevents Vispy crash on empty arrays
+
+    def update_nodes(self):
+        colors = self.current_colors.copy()
+        import matplotlib.colors as mcolors
+        if getattr(self, 'hovered_node_idx', None) is not None:
+            colors[self.hovered_node_idx] = mcolors.to_rgba(cfg.HOVER_COLOR)
+            
+        sizes = getattr(self, 'current_sizes', cfg.NODE_SIZE)
+        shapes = getattr(self, 'current_shapes', np.full(self.n_nodes, 'disc', dtype=object))
+        
+        # ---> FIXED: Fetch custom boundary color, fallback to black
+        bound_rgba = mcolors.to_rgba(getattr(cfg, 'NODE_BOUNDARY_COLOR', '#000000'))
+        
+        edge_colors = np.zeros((self.n_nodes, 4), dtype=np.float32)
+        edge_colors[:] = bound_rgba 
+        
+        # ---> NEW: Fetch custom boundary width, fallback to 0.5
+        b_width = getattr(cfg, 'NODE_BOUNDARY_WIDTH', 0.5)
+        edge_widths = np.full(self.n_nodes, b_width, dtype=np.float32)
+        
+        if getattr(self, 'selected_indices', None) is not None and len(self.selected_indices) > 0:
+            hover_rgba = mcolors.to_rgba(cfg.HOVER_COLOR)
+            conn_rgba = mcolors.to_rgba(getattr(cfg, 'CONNECTED_NODE_COLOR', '#ff0000'))
+            
+            # Cache the neighbor computation because np.isin is expensive and selected_indices don't change during drag
+            current_sel_tuple = tuple(self.selected_indices)
+            if getattr(self, '_last_selected_tuple', None) != current_sel_tuple:
+                self._last_selected_tuple = current_sel_tuple
+                
+                # Find neighbors using fast NumPy masking
+                selected_arr = np.array(self.selected_indices)
+                mask_u = np.isin(self.edges[:, 0], selected_arr)
+                mask_v = np.isin(self.edges[:, 1], selected_arr)
+                
+                # XOR mask correctly isolates edges where exactly one side is selected
+                # meaning the other side must be a neighbor.
+                valid_edge_mask = mask_u ^ mask_v
+                connected_edges = self.edges[valid_edge_mask]
+                
+                # Extract unique neighbors that aren't themselves selected
+                self._cached_neighbors = np.unique(connected_edges[~np.isin(connected_edges, selected_arr)])
+                
+            neighbor_indices = self._cached_neighbors
+            
+            if len(neighbor_indices) > 0:
+                edge_colors[neighbor_indices] = conn_rgba
+                edge_widths[neighbor_indices] = 2.0
+                
+            edge_colors[self.selected_indices] = hover_rgba
+            edge_widths[self.selected_indices] = 2.0
+        
+       # ---> NEW: Filter data by visibility mask <---
+        vis = self.visible_mask
+        if not np.any(vis):
+            self.markers.visible = False
+        else:
+            self.markers.visible = True
+            
+            # Safely extract array and handle single float cases
+            safe_sizes = sizes[vis] if isinstance(sizes, np.ndarray) else sizes
+            
+            self.markers.set_data(
+                pos=self.pos[vis], 
+                face_color=colors[vis], 
+                edge_color=edge_colors[vis], 
+                size=safe_sizes, 
+                edge_width=edge_widths[vis],
+                symbol=shapes[vis].tolist() 
+            )
+        self.markers.set_gl_state('translucent', depth_test=False)
+        self.canvas.update()
+        
+        # ---> NEW: Force HUD to instantly sync whenever visual state changes
+        self._update_hud_elements()
+
+    def create_hud(self):
+        self.instr_text = scene.visuals.Text(text="[ENTER] Command | [LeftClick] Label | [RightClick] Select/Clear | [Scroll] Zoom | [Shift + LeftClick] Copy Node Header | [LeftClick + Drag] Pan | [RightClick + Drag] GroupSelect/MoveNodes", \
+            bold=False, font_size=8, color='gray', pos=(10, 10), anchor_y='bottom', anchor_x='left', parent=self.canvas.scene)
+        self.console_bg = scene.visuals.Rectangle(center=(520, 70), width=1000, height=40, color=(0.95, 0.95, 0.95, 0.95), border_color='black', parent=self.canvas.scene)
+        self.console_bg.visible = False
+        self.console_text = scene.visuals.Text(text="", bold=True, font_size=8, color=cfg.TEXT_COLOR, pos=(30, 60), anchor_y='bottom', anchor_x='left', parent=self.canvas.scene)
+        self.zoom_text = scene.visuals.Text(text="", bold=False, font_size=8, color='gray', pos=(self.canvas.size[0] - 10, self.canvas.size[1] - 30), anchor_y='bottom', anchor_x='right', parent=self.canvas.scene)
+        self.hidden_text = scene.visuals.Text(text="", bold=False, font_size=8, color='gray', pos=(self.canvas.size[0] - 10, self.canvas.size[1] - 30), anchor_y='bottom', anchor_x='right', parent=self.canvas.scene)
+
+    def process_command(self, cmd_str, record_history=True):
+        cmd_str = cmd_str.strip()
+        if not cmd_str: return
+
+        # Normalize reverse commands (e.g., 'color reset' -> 'reset color', 'help color' -> 'color help')
+        
+
+        # --- 0. FILE-BACKED HISTORY ---
+        # Only record if it's different from the very last command typed
+        if record_history:
+            if not self.command_history or self.command_history[-1] != cmd_str:
+                self.command_history.append(cmd_str)
+                try:
+                    os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
+                    with open(self.history_file, "a", encoding="utf-8") as f:
+                        f.write(cmd_str + "\n")
+                    
+                    # Truncate if file exceeds 1 MB (1,048,576 bytes)
+                    if os.path.getsize(self.history_file) > 1048576:
+                        # Keep latest ~2000 lines (safely under 1MB limit for string paths)
+                        self.command_history = self.command_history[-2000:]
+                        with open(self.history_file, "w", encoding="utf-8") as f:
+                            for line in self.command_history:
+                                f.write(line + "\n")
+                except Exception as e:
+                    print(f"Warning: Failed to save history to {self.history_file} ({e})")
+
+        # --- 3. PARSE COMMAND ---
+        parts = cmd_str.split()
+        if not parts: return
+        
+        command_name = parts[0].lower()
+        args = parts[1:]
+
+        # --- 6. DYNAMIC EXTERNAL COMMANDS ---
+        try:
+            module = importlib.import_module(f"commands.{command_name}")
+            importlib.reload(module) 
+            
+            if hasattr(module, 'run'):
+                self.console_text.text = f"Running {command_name}..."
+                if hasattr(app, 'process_events'):
+                    app.process_events() 
+                module.run(self, args)
+            else:
+                self.console_text.text = f"Error: No 'run' in {command_name}"
+                
+        except ModuleNotFoundError:
+            self.console_text.text = f"Unknown command: {command_name}"
+        except Exception as e:
+            self.console_text.text = f"Error: {e}"
+            print(f"Command Error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_key_press(self, event):
+        # --- SAFE KEY DETECTION ---
+        # Vispy sometimes fails to map hardware toggles (like CapsLock, NumLock) 
+        # and passes None. We must ignore these to prevent attribute errors.
+        if getattr(event, 'key', None) is None:
+            return
+
+        # --- NEW: Global Escape Interceptor ---
+        if event.key == 'Escape':
+            event.handled = True  # Block Vispy from closing the window
+            if self.console_mode:
+                self.console_mode = False
+                self.console_bg.visible = False
+                self.console_text.text = ""
+                self.canvas.update()
+            return
+
+        # --- Console Typing Mode ---
+        if self.console_mode:
+            event.handled = True 
+            
+            # Safely extract the key name as a string
+            key_name = getattr(event.key, 'name', '') or ''
+
+            # Detect modifiers for Copy/Paste safely
+            is_modifier_active = 'Control' in event.modifiers or 'Meta' in event.modifiers
+            is_paste = (key_name.lower() == 'v') and is_modifier_active
+            is_copy = (key_name.lower() == 'c') and is_modifier_active
+
+            if event.key in ['Enter', 'Return']:
+                self.process_command(self.input_buffer)
+                self.console_mode = False; self.console_bg.visible = False; self.canvas.update()
+                
+            elif event.key == 'Backspace':
+                if self.cursor_pos > 0:
+                    self.input_buffer = self.input_buffer[:self.cursor_pos-1] + self.input_buffer[self.cursor_pos:]
+                    self.cursor_pos -= 1
+                    self._update_console_text()
+                    
+            elif event.key == 'Delete':
+                if self.cursor_pos < len(self.input_buffer):
+                    self.input_buffer = self.input_buffer[:self.cursor_pos] + self.input_buffer[self.cursor_pos+1:]
+                    self._update_console_text()
+                    
+            elif event.key == 'Left':
+                self.cursor_pos = max(0, self.cursor_pos - 1)
+                self._update_console_text()
+                
+            elif event.key == 'Right':
+                self.cursor_pos = min(len(self.input_buffer), self.cursor_pos + 1)
+                self._update_console_text()
+                
+            elif event.key == 'Up':
+                if hasattr(self, 'command_history') and self.command_history:
+                    self.history_index = max(0, self.history_index - 1)
+                    self.input_buffer = self.command_history[self.history_index]
+                    self.cursor_pos = len(self.input_buffer)
+                    self._update_console_text()
+                    
+            elif event.key == 'Down':
+                if hasattr(self, 'command_history') and self.command_history:
+                    self.history_index = min(len(self.command_history), self.history_index + 1)
+                    if self.history_index == len(self.command_history):
+                        self.input_buffer = ""
+                    else:
+                        self.input_buffer = self.command_history[self.history_index]
+                    self.cursor_pos = len(self.input_buffer)
+                    self._update_console_text()
+                    
+            elif is_paste:
+                try:
+                    from vispy import app as vispy_app
+                    native_app = vispy_app.use_app().native
+                    
+                    cb_text = native_app.clipboard().text()
+                    if cb_text:
+                        cb_text = cb_text.replace('\n', ' ').replace('\r', '') 
+                        self.input_buffer = self.input_buffer[:self.cursor_pos] + cb_text + self.input_buffer[self.cursor_pos:]
+                        self.cursor_pos += len(cb_text)
+                        self._update_console_text()
+                except Exception as e:
+                    print(f"Paste failed: {e}")
+                    
+            elif is_copy:
+                try:
+                    from vispy import app as vispy_app
+                    native_app = vispy_app.use_app().native
+                    
+                    native_app.clipboard().setText(self.input_buffer)
+                    print("Copied command to clipboard.")
+                except Exception as e:
+                    print(f"Copy failed: {e}")
+                    
+            elif len(event.text) > 0 and not is_modifier_active and event.key not in ['Shift', 'Alt']:
+                self.input_buffer = self.input_buffer[:self.cursor_pos] + event.text + self.input_buffer[self.cursor_pos:]
+                self.cursor_pos += len(event.text)
+                self._update_console_text()
+                
+        # --- Opening the Console (and hotkeys) ---
+        else:
+            key_name = getattr(event.key, 'name', '') or ''
+            is_modifier_active = 'Control' in event.modifiers or 'Meta' in event.modifiers
+            
+            # Handle Undo / Redo
+            if (key_name.lower() == 'z') and is_modifier_active:
+                self._do_undo()
+                event.handled = True
+                return
+            if (key_name.lower() == 'y') and is_modifier_active:
+                self._do_redo()
+                event.handled = True
+                return
+
+            if event.key in ['Enter', 'Return']:
+                self.console_mode = True
+                self.input_buffer = ""
+                self.cursor_pos = 0
+                
+                if hasattr(self, 'command_history'):
+                    self.history_index = len(self.command_history)
+                else:
+                    self.history_index = 0
+                    
+                self.console_bg.visible = True
+                self._update_console_text()
+                event.handled = True
+
+    def on_mouse_press(self, event):
+        # ---> 1. RIGHT-CLICK LOGIC (Drag & Select) <---
+        if event.button == 2 and not self.console_mode:
+            self.tooltip.text = "" 
+            
+            tr = self.canvas.scene.node_transform(self.view.scene)
+            mouse_world = tr.map(event.pos)[:2]
+            
+            dists = np.linalg.norm(self.pos[:, :2] - mouse_world, axis=1)
+            dists[~self.visible_mask] = np.inf
+            nearest_idx = np.argmin(dists)
+            
+            node_screen_pos = tr.inverse.map(self.pos[nearest_idx])[:2]
+            screen_dist = np.linalg.norm(node_screen_pos - event.pos)
+            
+            is_node_clicked = screen_dist < cfg.NODE_SIZE
+            self.drag_start_mouse = mouse_world
+            
+            if is_node_clicked:
+                self._save_state()
+
+                # Modifier logic for individual node clicking
+                if 'Shift' in event.modifiers:
+                    if nearest_idx not in self.selected_indices:
+                        self.selected_indices.append(nearest_idx)
+                elif 'Control' in event.modifiers or 'Meta' in event.modifiers:
+                    if nearest_idx in self.selected_indices:
+                        self.selected_indices.remove(nearest_idx)
+                else:
+                    if nearest_idx not in self.selected_indices:
+                        self.selected_indices = [nearest_idx]
+                        
+                self.update_selection_visual()
+                
+                if nearest_idx in self.selected_indices:
+                    if not getattr(cfg, 'UMAP_MODE', False):
+                        self.is_multi_dragging = True
+                        self.drag_start_nodes_pos = self.pos[self.selected_indices, :2].copy()
+            else:
+                # Clicked empty space: Store the current state, DO NOT clear yet
+                self._pre_drag_selection = set(self.selected_indices)
+                self.is_box_selecting = True
+                self.selection_box.set_data(pos=np.zeros((5, 2)))
+                self.selection_box.visible = True
+                
+            event.handled = True 
+            return
+            
+        # ---> 2. SHIFT + LEFT-CLICK LOGIC (Copy to Clipboard) <---
+        # Vispy Button 1 = Left Click
+        if event.button == 1 and 'Shift' in event.modifiers and not self.console_mode:
+            tr = self.canvas.scene.node_transform(self.view.scene)
+            mouse_world = tr.map(event.pos)[:2]
+            
+            dists = np.linalg.norm(self.pos[:, :2] - mouse_world, axis=1)
+            dists[~self.visible_mask] = np.inf
+            nearest_idx = np.argmin(dists)
+            
+            node_screen_pos = tr.inverse.map(self.pos[nearest_idx])[:2]
+            screen_dist = np.linalg.norm(node_screen_pos - event.pos)
+            
+            if screen_dist < (cfg.NODE_SIZE / 1.5):
+                full_header = self.full_headers[nearest_idx]
+                try:
+                    # Use Vispy's native app instance, just like in on_key_press
+                    from vispy import app as vispy_app
+                    native_app = vispy_app.use_app().native
+                    native_app.clipboard().setText(full_header)
+                    
+                    self.console_text.text = f"Copied: {full_header}"
+                    print(f"Copied to clipboard: {full_header}")
+                except Exception as e:
+                    self.console_text.text = f"Copy Failed: {full_header}"
+                    print(f"Clipboard Error: {e}")
+                
+            event.handled = True
+            return
+        
+        # ---> 3. PLAIN LEFT-CLICK LOGIC (Show Label) <---
+        if event.button == 1 and 'Shift' not in event.modifiers and not self.console_mode:
+            tr = self.canvas.scene.node_transform(self.view.scene)
+            mouse_world = tr.map(event.pos)[:2]
+            
+            dists = np.linalg.norm(self.pos[:, :2] - mouse_world, axis=1)
+            dists[~self.visible_mask] = np.inf
+            nearest_idx = np.argmin(dists)
+            
+            node_screen_pos = tr.inverse.map(self.pos[nearest_idx])[:2]
+            screen_dist = np.linalg.norm(node_screen_pos - event.pos)
+            
+            # If clicked within the node's radius, show the label and print full header
+            if screen_dist < cfg.NODE_SIZE:
+                self.selected_node_idx = nearest_idx
+                
+                # Row 1: Cluster + Header
+                lbl_line1 = ""
+                if getattr(self, 'cluster_labels', None) is not None:
+                    cid = self.cluster_labels[nearest_idx]
+                    lbl_line1 = "[Noise] " if cid == -1 else f"[Cluster {cid}] "
+                
+                lbl_line1 += self.full_headers[nearest_idx]
+                
+                # Row 2: Groups (if they exist)
+                group_line = ""
+                group_print = ""
+                if getattr(self, 'group_labels', None) and self.group_labels[nearest_idx]:
+                    group_str = ", ".join(sorted(self.group_labels[nearest_idx]))
+                    group_line = f"\n[Groups: {group_str}]"
+                    group_print = f" [Groups: {group_str}]"
+                
+                self.tooltip.text = f"{lbl_line1}{group_line}"
+                self.tooltip.pos = node_screen_pos + [15, -15]
+                
+                # Fetch and print the full FASTA header (keep print statement on one line)
+                full_header = self.full_headers[nearest_idx]
+                print(f"Node Selected: {full_header}")
+                
+                # Optionally update the HUD console text with a brief confirmation
+                self.console_text.text = f"Selected: {lbl_line1}{group_print}"
+                
+            # Notice there is no 'else:' block here anymore! 
+            # Clicking empty space does nothing, leaving the label intact.
+                
+            event.handled = True
+            return
+    
+    def _update_hud_elements(self, event=None):
+        """Updates the zoom indicator, hidden nodes count, and maintains the tooltip pixel gap."""
+        # 1. Update Zoom Indicator (Visible World Width)
+        if hasattr(self, 'zoom_text'):
+            visible_width = self.view.camera.rect.width
+            self.zoom_text.text = f"View Width: {visible_width:.1f}"
+            
+            # ---> INCREASED GAP for High DPI Displays (-70 instead of -45)
+            self.zoom_text.pos = (self.canvas.size[0] - 10, self.canvas.size[1] - 55) 
+
+        # 2. Update Hidden Nodes Indicator
+        if hasattr(self, 'hidden_text') and hasattr(self, 'visible_mask'):
+            hidden_count = int(np.sum(~self.visible_mask))
+            self.hidden_text.text = f"Hidden Nodes: {hidden_count}"
+            if hidden_count > 0:
+                self.hidden_text.color = 'red'
+            else:
+                self.hidden_text.color = 'gray'
+                
+            # ---> Keep hidden text anchored at the bottom
+            self.hidden_text.pos = (self.canvas.size[0] - 10, self.canvas.size[1] - 30)
+
+        # 3. Update Tooltip Distance
+        if getattr(self, 'selected_node_idx', None) is not None and getattr(self, 'tooltip', None) and self.tooltip.text != "":
+            tr = self.canvas.scene.node_transform(self.view.scene)
+            screen_pos = tr.inverse.map(self.pos[self.selected_node_idx])
+
+            self.tooltip.pos = screen_pos[:2] + [15, -15]
+            
+        self.canvas.update()
+
+    def on_resize(self, event): 
+        self._hud_timer.start()
+        if hasattr(self, 'slider_overlay'):
+            self.position_slider_overlay()
+
+    def on_mouse_wheel(self, event):
+        self._hud_timer.start()
+
+        # ---> Rotate selected nodes if right-click dragging <---
+        if getattr(self, 'is_multi_dragging', False) and 2 in event.buttons:
+            # event.delta[1] is > 0 for scroll up, < 0 for scroll down
+            angle = event.delta[1] * (np.pi / 36) # 5 degrees per tick
+            
+            cos_a = np.cos(angle)
+            sin_a = np.sin(angle)
+            
+            center = self.drag_start_mouse
+            
+            pts = self.drag_start_nodes_pos - center
+            rotated_x = pts[:, 0] * cos_a - pts[:, 1] * sin_a
+            rotated_y = pts[:, 0] * sin_a + pts[:, 1] * cos_a
+            self.drag_start_nodes_pos[:, 0] = rotated_x + center[0]
+            self.drag_start_nodes_pos[:, 1] = rotated_y + center[1]
+            
+            tr = self.canvas.scene.node_transform(self.view.scene)
+            mouse_world = tr.map(event.pos)[:2]
+            delta = mouse_world - self.drag_start_mouse
+            self.pos[self.selected_indices, :2] = self.drag_start_nodes_pos + delta
+            
+            # Call a single optimized routine when just moving nodes
+            self.update_selection_visual()
+            event.handled = True
+            return
+
+    def on_mouse_move(self, event):
+        tr = self.canvas.scene.node_transform(self.view.scene)
+        mouse_world = tr.map(event.pos)[:2]
+
+        # ---> 0. FAILSAFE: CATCH MISSED MOUSE RELEASES <---
+        # If we are dragging or boxing, but the right button is NO LONGER held down:
+        if getattr(self, 'is_multi_dragging', False) or getattr(self, 'is_box_selecting', False):
+            if 2 not in event.buttons:
+                self.on_mouse_release(event)
+                return
+
+        # ---> 1. MULTI-NODE DRAGGING <---
+        if getattr(self, 'is_multi_dragging', False):
+            delta = mouse_world - self.drag_start_mouse
+            self.pos[self.selected_indices, :2] = self.drag_start_nodes_pos + delta
+            
+            # Remove redundant calls: only call update_selection_visual once
+            self.update_selection_visual()
+            
+            event.handled = True
+            return
+            
+        # ---> 2. BOX SELECTION DRAWING <---
+        if getattr(self, 'is_box_selecting', False):
+            x0, y0 = self.drag_start_mouse
+            x1, y1 = mouse_world
+            
+            rect_pts = np.array([
+                [x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]
+            ])
+            self.selection_box.set_data(pos=rect_pts)
+            
+            # --- Dynamic Highlighting Math ---
+            min_x, max_x = min(x0, x1), max(x0, x1)
+            min_y, max_y = min(y0, y1), max(y0, y1)
+            xs = self.pos[:, 0]
+            ys = self.pos[:, 1]
+            mask = (xs >= min_x) & (xs <= max_x) & (ys >= min_y) & (ys <= max_y) & self.visible_mask
+            box_indices = set(np.where(mask)[0].tolist())
+            
+            pre_drag = getattr(self, '_pre_drag_selection', set())
+            
+            if 'Shift' in event.modifiers:
+                current_selection = pre_drag.union(box_indices)     # Add
+            elif 'Control' in event.modifiers or 'Meta' in event.modifiers:
+                current_selection = pre_drag.difference(box_indices)# Remove
+            else:
+                current_selection = box_indices                     # Replace
+                
+            self.selected_indices = list(current_selection)
+            self.update_selection_visual()
+            
+            event.handled = True
+            return
+
+        # ---> 3. PANNING HUD OVERLAY <---
+        # Update if we are panning (Left Click Drag only)
+        if 1 in event.buttons:
+            self._hud_timer.start()
+
+        # ---> 4. HOVER EFFECT <---
+        if not self.console_mode and not event.buttons: 
+            dists = np.linalg.norm(self.pos[:, :2] - mouse_world, axis=1)
+            dists[~self.visible_mask] = np.inf
+            nearest_idx = np.argmin(dists)
+            
+            node_screen_pos = tr.inverse.map(self.pos[nearest_idx])[:2]
+            screen_dist = np.linalg.norm(node_screen_pos - event.pos)
+            
+            if screen_dist < (cfg.NODE_SIZE / 1.5):
+                if getattr(self, 'hovered_node_idx', None) != nearest_idx:
+                    self.hovered_node_idx = nearest_idx
+                    self.update_nodes()
+            else:
+                if getattr(self, 'hovered_node_idx', None) is not None:
+                    self.hovered_node_idx = None
+                    self.update_nodes()
+    
+    def on_mouse_release(self, event):
+        # ---> 1. MULTI-DRAG RELEASE <---
+        if getattr(self, 'is_multi_dragging', False):
+            self.is_multi_dragging = False
+            event.handled = True
+            return
+            
+        # ---> 2. FINALIZE BOX SELECTION <---
+        if getattr(self, 'is_box_selecting', False):
+            self.is_box_selecting = False
+            self.selection_box.visible = False
+            
+            tr = self.canvas.scene.node_transform(self.view.scene)
+            mouse_world = tr.map(event.pos)[:2]
+            
+            x0, y0 = self.drag_start_mouse
+            x1, y1 = mouse_world
+            
+            # Single click detection (no drag distance)
+            if np.hypot(x1 - x0, y1 - y0) < 1.0:
+                if 'Shift' not in event.modifiers and 'Control' not in event.modifiers and 'Meta' not in event.modifiers:
+                    self.selected_indices = []
+                    self.update_selection_visual()
+
+            # Output final count to console
+            if len(self.selected_indices) > 0:
+                self.console_text.text = f"Selected {len(self.selected_indices)} nodes."
+            else:
+                self.console_text.text = "Selection cleared."
+                
+            event.handled = True
+            return
+        
+if __name__ == '__main__':
+    viewer = MainViewer()
+    app.run()

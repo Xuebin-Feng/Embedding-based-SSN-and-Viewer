@@ -1,0 +1,14 @@
+=== ALIGN SIMILARITY MATRIX (Align_Similarity_Matrix.py) ===
+
+Description:
+This script computes an all-vs-all sequence similarity network (SSN) using residue-level protein embeddings. Instead of using traditional amino acid substitution matrices, it calculates similarity matrices by comparing the dense high-dimensional embedding vectors of each residue. It performs sequence alignment scoring using dynamic programming (Smith-Waterman for local alignment and Needleman-Wunsch for global alignment) implemented in optimized Numba JIT functions for maximum performance. To accelerate alignment of massive datasets, it includes an optional pre-filtering step that computes the global cosine similarity of sequence mean embeddings to skip full alignments for highly dissimilar sequences.
+
+Parameters:
+- INPUT_HDF5: The input HDF5 file containing the pre-computed sequence embeddings.
+- EDGE_PREFILTERING: Toggle to enable pre-filtering sequence pairs using global cosine similarity. If enabled, full residue-level alignments are skipped for pairs below the similarity cutoff.
+- PREFILTER_STRENGTH: The percentage of sequence pairs with the lowest global cosine similarity scores to exclude from alignment calculations. Higher values increase speed but risk missing alignments between distantly related proteins.
+- GENERATE_PATHS: Toggle to calculate and save the traceback alignment paths (match/gap index mappings) in a separate paths file. If OFF, saves significant disk space.
+- WORKERS: The number of CPU processes/threads allocated for parallel alignment calculations.
+- LOCAL_GAP_P: The gap penalty score applied for local alignments. More negative values penalize gaps more heavily, resulting in fewer gaps.
+- GLOBAL_GAP_P: The gap penalty score applied for global alignments.
+- BATCH_SIZE: The number of sequence pairs processed in a single chunk before writing to disk. Larger batches maximize CPU core utilization but increase memory consumption. Can be set to a number or 'auto'.

@@ -1,0 +1,37 @@
+=== EMBEDDING PW ALIGNMENT (Embedding_PWA.py) ===
+
+Description:
+This script computes a Pairwise Sequence Alignment (PWA) between exactly two sequences using protein language model embeddings. It calculates residue-level Euclidean distances between sequence embedding tensors, standardizes these values, and applies local (Smith-Waterman) or global (Needleman-Wunsch) dynamic programming to find the optimal path. The script outputs a text-based alignment visualization to the console, showing matching and mismatching segments along with their similarity scores. It supports highlighting specific residue positions to assist in analyzing structural conservation.
+
+Parameters:
+- INPUT_FASTA: The FASTA file containing sequences to align. Used to retrieve headers and raw sequence strings.
+- INPUT_EMBED: The HDF5 embedding database containing the dense residue embedding vectors.
+- REF_HEADER: The exact header string of the reference sequence to be aligned.
+- REF_SEQUENCE: Optional: A raw amino acid sequence string to use as the reference, overriding the header lookup.
+- TAR_HEADER: The exact header string of the target sequence to be aligned.
+- TAR_SEQUENCE: Optional: A raw amino acid sequence string to use as the target, overriding the header lookup.
+- HIGHLIGHT_POSITIONS: Comma-separated list of residue numbers or ranges (1-indexed, e.g., '1, 4-6, 12') to highlight in the final console visualization.
+- ALIGNMENT_MODE: Select whether to compute a 'global' or 'local' alignment.
+- LOCAL_GAP_P: The gap penalty score applied for local alignments.
+- GLOBAL_GAP_P: The gap penalty score applied for global alignments.
+
+==================================================
+
+=== EMBEDDING DATABASE SEARCH (Embedding_SSEARCH.py) ===
+
+Description:
+This script performs a one-vs-all database search using sequence embeddings. Similar to traditional SSEARCH or BLAST, it takes a query sequence and scans it against a target database of sequence embeddings. It computes pairwise alignments using local or global embedding dynamic programming across multiple CPU threads, normalizes scores to prevent alignment length biases, and writes two output files: a ranked hits text report and a FASTA file containing all top-scoring sequences.
+
+Parameters:
+- INPUT_FASTA: The sequence FASTA file associated with the embedding database.
+- INPUT_EMBED: The HDF5 embedding database file to scan against.
+- QUERY_HEADER: The header of a sequence in the FASTA file to use as the query.
+- QUERY_SEQUENCE: Optional: A raw amino acid sequence string to search with, overriding the header lookup.
+- OUTPUT_NAME: Optional: A custom prefix for output files. If blank, uses the query header.
+- TOP_K: The maximum number of top-ranking hits to output.
+- NORM_THRESHOLD: Optional: The minimum normalized score required for a sequence to be saved.
+- ALIGNMENT_MODE: Whether to perform local (Smith-Waterman) or global (Needleman-Wunsch) searches.
+- NORM_MODE: The length-normalization formula applied to score calculations (e.g., alignment_length, shorter_sequence, longer_sequence, average_sequence).
+- LOCAL_GAP_P: The gap penalty applied for local database scanning.
+- GLOBAL_GAP_P: The gap penalty applied for global database scanning.
+- WORKERS: The number of CPU threads allocated for parallel database searching.

@@ -1,0 +1,1895 @@
+import unicodedata  # Pre-load to prevent Windows DLL search path conflicts with Qt/OpenGL
+import sys
+import os
+import ast
+import json
+import subprocess
+
+MAX_CORES = os.cpu_count() or 16
+
+# Fix High-DPI scaling
+os.environ["QT_API"] = "pyqt6"
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QTabWidget, QFormLayout, QLineEdit, 
+                             QPushButton, QMessageBox, QLabel, QScrollArea, QTextEdit,
+                             QSplitter, QComboBox, QSlider, QDoubleSpinBox, QSpinBox, 
+                             QFileDialog, QStyle, QStyleOptionSlider)
+from PyQt6.QtCore import Qt
+
+class NoScrollComboBox(QComboBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    def wheelEvent(self, e):
+        e.ignore()
+
+class NoScrollSlider(QSlider):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
+    def wheelEvent(self, e):
+        e.ignore()
+        
+    def mousePressEvent(self, event):
+        from PyQt6.QtCore import Qt
+        if event.button() == Qt.MouseButton.LeftButton:
+            opt = QStyleOptionSlider()
+            self.initStyleOption(opt)
+            sr = self.style().subControlRect(QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, self)
+            
+            # If the user clicked the track (not the handle itself), calculate the jump
+            if not sr.contains(event.pos()):
+                val = self.style().sliderValueFromPosition(self.minimum(), self.maximum(), int(event.position().x()), self.width())
+                self.setValue(val)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+class NoScrollSpinBox(QSpinBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    def wheelEvent(self, e):
+        e.ignore()
+
+class NoScrollDoubleSpinBox(QDoubleSpinBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    def wheelEvent(self, e):
+        e.ignore()
+
+class DynamicComboBox(QComboBox):
+    def __init__(self, folder, ext, include_ext=False, exclude_str=None, parent=None):
+        super().__init__(parent)
+        self.folder = folder
+        self.ext = ext
+        self.include_ext = include_ext
+        self.exclude_str = exclude_str
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+    def populate(self):
+        current_text = self.currentText()
+        self.clear()
+        options = []
+        if os.path.exists(self.folder):
+            for f in os.listdir(self.folder):
+                if f.endswith(self.ext):
+                    # --- NEW: Skip files containing the exclusion string ---
+                    if self.exclude_str and self.exclude_str in f:
+                        continue
+                    # -------------------------------------------------------
+                    if self.include_ext:
+                        options.append(f)
+                    else:
+                        options.append(f.replace(self.ext, ""))
+        self.addItems(options)
+        if current_text:
+            idx = self.findText(current_text)
+            if idx >= 0:
+                self.setCurrentIndex(idx)
+
+    def showPopup(self):
+        self.populate()
+        super().showPopup()
+
+class ToolsGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("SSN Utilities Tools")
+        self.resize(850, 650)
+        
+        # --- CENTRALIZED SCRIPT TIPS DICTIONARY ---
+        self.SCRIPT_TIPS = {
+            "Sanitize_Sequences.py": {
+                "INPUT_FASTA": "Sequence Set (.fasta): The raw sequence file to be cleaned. Sanitization standardizes characters to uppercase, strips trailing/leading invalid symbols, and filters out non-standard elements.",
+                "ENABLE_LENGTH_FILTER": "Enable Length Filter: Toggle to filter sequences based on their amino acid length. When enabled, only sequences within the specified minimum and maximum length bounds will be retained.",
+                "OVER_WRITE": "Overwrite Original File: If enabled, the sanitized sequences will overwrite the input file. If disabled, a new file named <input_name>_sanitized.fasta will be created to preserve the original raw file.",
+                "MIN_SEQ_LENGTH": "Minimum Sequence Length: The lower limit (inclusive) for filtering sequences by length. Sequences shorter than this number of residues will be discarded during sanitization.",
+                "MAX_SEQ_LENGTH": "Maximum Sequence Length: The upper limit (inclusive) for filtering sequences by length. Sequences longer than this number of residues will be discarded to remove outliers."
+            },
+            "Generate_Embeddings.py": {
+                "INPUT_FASTA": "Sequence Set (.fasta): The sanitized input sequence file to generate embeddings for. Each sequence is parsed and fed through the neural network to produce high-dimensional dense representations.",
+                "MODEL_NAME": "Model Name: The protein language model (pLM) used to calculate sequence embeddings. Supported architectures include Evolutionary Scale Modeling (esmc_300m/600m) and Rostlab models (prot_bert/ProstT5).",
+                "SAVING_MODE": "Saving Mode: The floating-point precision for storing embedding tensors in the HDF5 file. Float16 is highly recommended to save up to 50% disk space and RAM, while float32 retains full uncompressed precision."
+            },
+            "Align_Similarity_Matrix.py": {
+                "INPUT_HDF5": "Embedding Set (.h5): The HDF5 database containing dense embedding vectors for each sequence in the network. These vectors are used to compute residue-level alignment scores.",
+                "EDGE_PREFILTERING": "Edge Prefiltering: Pre-filter sequence pairs by evaluating the cosine similarity of their global mean embedding vectors. This avoids running full alignments on highly dissimilar pairs, saving computation.",
+                "PREFILTER_STRENGTH": "Strength (%): The percentage of candidate edges with the lowest cosine similarity to discard. Higher percentages speed up calculations by performing sequence alignment on only the most promising pairs.",
+                "GENERATE_PATHS": "Path Generation: Toggle whether to compute and save the full traceback alignment paths (match/mismatch/gap indices) inside the output network. Enabling this increases output file size.",
+                "WORKERS": "CPU Workers: The number of CPU threads allocated for parallel processing. Running with more threads speeds up the alignment of large embedding matrices by distributing pairs across multiple cores.",
+                "LOCAL_GAP_P": "Local Align Gap Penalty: The penalty score applied for initiating or extending gaps in local alignment. More negative values enforce stricter local alignments with fewer gaps.",
+                "GLOBAL_GAP_P": "Global Align Gap Penalty: The penalty score applied for initiating or extending gaps in global alignment. Adjust this to control how alignment length matches are forced.",
+                "BATCH_SIZE": "Batch Size: The number of sequence pairs processed in a single chunk. Larger values maximize CPU utilization but require more system memory. Set to 'auto' or specify a number."
+            },
+            "Align_Substitution_Matrix.py": {
+                "INPUT_FASTA": "Sequence Set (.fasta): The structural sequences to be aligned using traditional substitution matrices. The alignment calculates pairwise local and global alignment scores.",
+                "MATRIX": "Substitution Matrix: The amino acid substitution matrix (e.g., BLOSUM62, PAM250) used to score matches/mismatches during pairwise alignment. Select based on the evolutionary distance of the sequences.",
+                "NUM_THREADS": "CPU Workers: The number of CPU threads allocated for parallel sequence alignments. Increasing threads speeds up computations on multi-core systems.",
+                "BATCH_SIZE": "Batch Size: The number of sequence pairs aligned per block. Tuning this controls memory consumption and parallel execution batch sizes.",
+                "SAFE_TEMP_DIR": "Temporary Working Directory: The directory for caching intermediate files and memory-mapped arrays during execution. Ensure it has enough free space for larger runs."
+            },
+            "Embedding_MSA.py": {
+                "INPUT_FASTA": "Sequence Set (.fasta): The raw sequence file to be aligned. These letters are aligned, padded with gaps, and output as the final Multiple Sequence Alignment (MSA).",
+                "INPUT_EMBED": "Embedding Set (.h5): The HDF5 database containing dense sequence embedding tensors. These embeddings drive the progressive profile alignments along the guide tree nodes.",
+                "INPUT_NETWORK": "Network / E-value (.h5): The pairwise similarity network used to build the evolutionary guide tree. For sparse networks, missing edge scores are predicted using regression.",
+                "SHOW_REGRESSION_PLOT": "Show Isotonic Regression Plot: Toggle whether to display a regression plot when a sparse network is loaded. This visualizes the fit between embedding distances and pairwise connectivity.",
+                "TREE_METHOD": "Tree Building Method: The method used to construct the guide tree. 'UPGMA' groups by average proximity. 'Neighbor-joining' adjusts for rate variations (slower but more biologically standard).",
+                "ALIGNMENT_SCORE": "Score Mode: Specifies whether to weight guide tree branches based on 'global' or 'local' connectivity scores. This determines the progressive alignment order.",
+                "NORMALIZATION_MODE": "Normalization Mode: Normalization method for pairwise embedding scores (e.g., alignment length, shorter sequence length). Not active when using raw BLAST E-values.",
+                "BOOTSTRAP_TREE": "Bootstrap Guide Tree: Toggle whether to build the guide tree using bootstrapped random trees (ON) or a single deterministic tree (OFF). Disabling this significantly speeds up the run.",
+                "NUM_TREES": "Number of Trees: The number of bootstrap replicates used to construct the consensus guide tree. Higher values generate a more stable topology but increase calculation time.",
+                "NOISE_SCALE": "Noise Scale: Standard deviation of random Gaussian noise added to the distance matrix during bootstrap tree building. Helps resolve branching ambiguities in similar sequences.",
+                "GAP_OPEN": "Gap Open Penalty: The penalty score applied for initiating a new gap within progressive profile alignments. More negative values result in fewer gaps.",
+                "GAP_EXTEND": "Gap Extend Penalty: The penalty score applied for extending an existing gap. More negative values yield shorter, more compact gap regions.",
+                "WORKERS": "CPU Workers: The number of CPU threads allocated for parallel consensus tree bootstrap replicates, accelerating guide tree construction.",
+                "SAFE_TEMP_DIR": "Temporary Working Directory: The directory for caching intermediate files and memory-mapped matrices. Ensures that massive guide tree calculations do not overflow RAM."
+            },
+            "Sparse_MSA_Converter.py": {
+                "CONVERT_ALL": "Convert All Alignments: If ON, converts all standard MSAs in the input folder to the space-saving sparse format. If OFF, only the selected MSA file is converted.",
+                "INPUT_FASTA": "Input MSA (.fasta): The standard multiple sequence alignment file to convert. The script extracts consensus positions to save files in the sparse representation."
+            },
+            "Parse_BLAST_Output.py": {
+                "INPUT_BLAST_TABULAR": "BLAST Results (.tabular): The outfmt 6 formatted BLAST text file to parse. The script extracts e-values, alignment identities, and headers to construct a compatible HDF5 network file."
+            },
+            "Embedding_Injection.py": {
+                "INPUT_EMBED": "Input Embedding Set (.h5): The HDF5 embedding database to receive the injected sequences and metadata. This updates files with correct headers.",
+                "INPUT_FASTA": "Input Sequence Set (.fasta): The fasta file containing sequences to be injected into the embedding file. Re-aligns sequence indexes and updates corresponding metadata."
+            },
+            "Embedding_Extraction.py": {
+                "INPUT_EMBED": "Input Embedding Set (.h5): The source HDF5 embedding file from which subset embeddings will be extracted based on matching sequence headers.",
+                "INPUT_FASTA": "Input Sequence Set (.fasta): The fasta file defining the subset of sequences to extract. Only embeddings matching these headers will be written to the output."
+            },
+            "Network_Injection.py": {
+                "OLD_NETWORK": "Input Network Edges (.h5): The pre-existing HDF5 network file. The script will inject newly calculated embedding alignments into this file to expand its edge details.",
+                "NEW_EMBEDDINGS": "Input Embedding Set (.h5): The HDF5 embedding set containing the dense representations to align and inject into the targeted network file.",
+                "LOCAL_GAP_P": "Local Align Gap Penalty: The penalty score applied for initiating or extending gaps in local alignment during the injection step.",
+                "GLOBAL_GAP_P": "Global Align Gap Penalty: The penalty score applied for initiating or extending gaps in global alignment during the injection step.",
+                "WORKERS": "CPU Workers: The number of CPU threads allocated for parallel embedding alignment calculation and network writing.",
+                "BATCH_SIZE": "Batch Size: The number of sequence alignments calculated per write block. Tuning this controls memory consumption and optimizes file write performance."
+            },
+            "Network_Extraction.py": {
+                "INPUT_NET": "Input Network Edges (.h5): The source network file containing pairwise connectivity data from which a subset will be extracted.",
+                "INPUT_FASTA": "Input Sequence Set (.fasta): The FASTA file defining the subset of sequences. Only network edges between these sequences will be extracted."
+            },
+            "Embedding_PWA.py": {
+                "INPUT_FASTA": "Sequence Set (.fasta): The FASTA file containing raw sequences. Used to retrieve sequence headers and amino acid sequences for display.",
+                "INPUT_EMBED": "Embedding Set (.h5): The HDF5 file containing the sequence embeddings. Needed to compute the pairwise embedding-based alignment.",
+                "REF_HEADER": "Reference Header: The exact FASTA header of the reference sequence to align. If left empty, the first sequence in the file is used.",
+                "REF_SEQUENCE": "Ref Sequence (Optional): Manually provide a raw amino acid sequence for the reference. If set, this overrides the reference header lookup.",
+                "TAR_HEADER": "Target Header: The exact FASTA header of the target sequence to align. If left empty, the second sequence in the file is used.",
+                "TAR_SEQUENCE": "Tar Sequence (Optional): Manually provide a raw amino acid sequence for the target. If set, this overrides the target header lookup.",
+                "HIGHLIGHT_POSITIONS": "Highlight Pos (e.g., 1, 4-6): A comma-separated list of 1-indexed residue positions or ranges to highlight in the alignment visualization.",
+                "ALIGNMENT_MODE": "Alignment Mode: Select whether to compute a global (Needleman-Wunsch) or local (Smith-Waterman) alignment based on embedding similarities.",
+                "LOCAL_GAP_P": "Local Align Gap Penalty: Gap penalty applied when using local alignment. Adjusts the frequency and size of gap insertions within local alignments.",
+                "GLOBAL_GAP_P": "Global Align Gap Penalty: Gap penalty applied when using global alignment. Adjusts the frequency and size of gap insertions across entire sequences."
+            },
+            "Embedding_SSEARCH.py": {
+                "INPUT_FASTA": "Sequence Set (.fasta): The FASTA file representing the database sequence names and residues, matching the embedding file database.",
+                "INPUT_EMBED": "Embedding Set (.h5): The HDF5 embedding file containing pre-computed tensors for database search. Pairwise scoring is run against these.",
+                "QUERY_HEADER": "Query Header: The exact header of the sequence within the FASTA database to use as the query. Overridden if Query Sequence is specified.",
+                "QUERY_SEQUENCE": "Query Sequence (Optional): A raw amino acid sequence string to search against the database, overriding the Query Header lookup.",
+                "OUTPUT_NAME": "Output Name: Custom prefix for search output files. If left blank, the query header (sanitized) is used as the default name.",
+                "TOP_K": "Top K Hits: The maximum number of highest-scoring database hits to include in the output results. Set to control list size.",
+                "NORM_THRESHOLD": "Norm Score Cutoff: The minimum normalized similarity score threshold for hits. Sequences scoring below this are excluded.",
+                "ALIGNMENT_MODE": "Alignment Mode: Whether to perform global or local alignment when scanning database sequence embeddings against the query.",
+                "NORM_MODE": "Normalization Mode: Length-normalization formula for alignment scores to prevent bias toward longer or shorter alignments.",
+                "LOCAL_GAP_P": "Local Align Gap Penalty: Gap penalty applied when using local alignment (Smith-Waterman) to scan database embeddings.",
+                "GLOBAL_GAP_P": "Global Align Gap Penalty: Gap penalty applied when using global alignment (Needleman-Wunsch) to scan database embeddings.",
+                "WORKERS": "CPU Workers: The number of CPU threads allocated for parallel scanning. Running with more threads reduces search time."
+            }
+        }
+        
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        
+        self.MANUAL_SETTINGS = {
+            "Sequence_and_Embedding_Preparation": {
+                "is_combined": True,
+                "scripts": {
+                    "Sanitize_Sequences.py": [
+                        {
+                            "var_name": "title_sanitize",
+                            "type": "title",
+                            "display": "Sequence Sanitization Settings:"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,    # <-- Added
+                            "dir_key": "FASTA_DIR",
+                            "display": "Sequence Set (.fasta):"
+                        },
+                        {
+                            "var_name": "ENABLE_LENGTH_FILTER", # <--- NEW
+                            "type": "switch",
+                            "display": "Enable Length Filter:"
+                        },
+                        {
+                            "var_name": "OVER_WRITE",
+                            "type": "switch",
+                            "display": "Overwrite Original File:"
+                        },
+                        {
+                            "var_name": "MIN_SEQ_LENGTH",
+                            "type": "number",
+                            "display": "Min Seq Length:"
+                        },
+                        {
+                            "var_name": "MAX_SEQ_LENGTH",
+                            "type": "number",
+                            "display": "Max Seq Length:"
+                        }
+                    ],
+                    "Generate_Embeddings.py": [
+                        {
+                            "var_name": "title_embed",
+                            "type": "title",
+                            "display": "Embedding Generation Settings:"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,    # <-- Added
+                            "dir_key": "FASTA_DIR",
+                            "display": "Sequence Set (.fasta):"
+                        },
+                        {
+                            "var_name": "MODEL_NAME",
+                            "type": "dropdown",
+                            "options": ["esmc_300m", "esmc_600m", "prot_bert", "ProstT5"],
+                            "display": "Model Name:"
+                        },
+                        {
+                            "var_name": "SAVING_MODE",
+                            "type": "dropdown",
+                            "options": ["float16", "float32"],
+                            "display": "Saving Mode:"
+                        }
+                    ]
+                }
+            },
+            "Align_Similarity_Matrix.py": [
+                {
+                    "var_name": "title_asm_io",
+                    "type": "title",
+                    "display": "Input & Output Settings:"
+                },
+                {
+                    "var_name": "INPUT_HDF5",
+                    "type": "dropdown_from_folder",
+                    "folder": "Embeddings",
+                    "extension": ".h5",
+                    "include_ext": True,
+                    "dir_key": "EMBED_DIR",
+                    "display": "Embedding Set (.h5):"
+                },
+                {
+                    "var_name": "EDGE_PREFILTERING",
+                    "type": "switch",
+                    "display": "Edge Prefiltering:"
+                },
+                {
+                    "var_name": "PREFILTER_STRENGTH",
+                    "type": "slider",
+                    "min": 0,
+                    "max": 80,
+                    "display": "Strength (%):"
+                },
+                {
+                    "var_name": "title_asm_align",
+                    "type": "title",
+                    "display": "Alignment Settings:"
+                },
+                {
+                    "var_name": "GENERATE_PATHS",
+                    "type": "switch",
+                    "display": "Path Generation:"
+                },
+                {
+                    "var_name": "LOCAL_GAP_P",
+                    "type": "negative_number",
+                    "display": "Local Align Gap Penalty:"
+                },
+                {
+                    "var_name": "GLOBAL_GAP_P",
+                    "type": "negative_number",
+                    "display": "Global Align Gap Penalty:"
+                },
+                {
+                    "var_name": "title_asm_hw",
+                    "type": "title",
+                    "display": "Hardware Settings:"
+                },
+                {
+                    "var_name": "WORKERS",
+                    "type": "slider",
+                    "min": 1,
+                    "max": MAX_CORES,
+                    "display": "CPU Workers:"
+                },
+                {
+                    "var_name": "BATCH_SIZE",
+                    "type": "text",
+                    "display": "Batch Size:"
+                }
+            ],
+            "Align_Substitution_Matrix": {
+                "is_combined": True,
+                "scripts": {
+                    "Align_Substitution_Matrix.py": [
+                        {
+                            "var_name": "title_sub_io",
+                            "type": "title",
+                            "display": "Input Settings:"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "FASTA_DIR",
+                            "display": "Sequence Set (.fasta):"
+                        },
+                        {
+                            "var_name": "title_sub_align",
+                            "type": "title",
+                            "display": "Alignment Settings:"
+                        },
+                        {
+                            "var_name": "MATRIX",
+                            "type": "dropdown",
+                            "options": ["BLOSUM45", "BLOSUM50", "BLOSUM62", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250"],
+                            "display": "Substitution Matrix:"
+                        },
+                        {
+                            "var_name": "title_sub_hw",
+                            "type": "title",
+                            "display": "Hardware & Workspace Settings:"
+                        },
+                        {
+                            "var_name": "NUM_THREADS",
+                            "type": "slider",
+                            "min": 1,
+                            "max": MAX_CORES,
+                            "display": "CPU Workers:"
+                        },
+                        {
+                            "var_name": "BATCH_SIZE",
+                            "type": "text",
+                            "display": "Batch Size:"
+                        },
+                        {
+                            "var_name": "SAFE_TEMP_DIR",
+                            "type": "folder_browser",
+                            "display": "Temporary Working Directory:"
+                        }
+                    ],
+                    "Parse_BLAST_Output.py": [
+                        {
+                            "var_name": "title_parse",
+                            "type": "title",
+                            "display": "Parse External BLAST Output:"
+                        },
+                        {
+                            "var_name": "INPUT_BLAST_TABULAR",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Networks_EValues"),
+                            "extension": ".tabular",
+                            "include_ext": True,
+                            "dir_key": "NETWORK_DIR",
+                            "display": "BLAST Results (.tabular):"
+                        }
+                    ]
+                }
+            },
+            "Embedding_MSA": {
+                "is_combined": True,
+                "scripts": {
+                    "Embedding_MSA.py": [
+                        {
+                            "var_name": "title_io",
+                            "type": "title",
+                            "display": "Input & Output Settings:"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "FASTA_DIR",
+                            "display": "Sequence Set (.fasta):"
+                        },
+                        {
+                            "var_name": "INPUT_EMBED",
+                            "type": "dropdown_from_folder",
+                            "folder": "Embeddings",
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "EMBED_DIR",
+                            "display": "Embedding Set (.h5):"
+                        },
+                        {
+                            "var_name": "INPUT_NETWORK",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Networks_EValues"),
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "NETWORK_DIR",
+                            "display": "Network / E-value (.h5):"
+                        },
+                        {
+                            "var_name": "SHOW_REGRESSION_PLOT",
+                            "type": "switch",
+                            "display": "Show Isotonic Regression Plot:"
+                        },
+                        {
+                            "var_name": "title_guide",
+                            "type": "title",
+                            "display": "Guide Tree Settings:"
+                        },
+                        {
+                            "var_name": "TREE_METHOD",
+                            "type": "dropdown",
+                            "options": ["UPGMA (Fast)", "Neighbor-joining (Slow)"],
+                            "display": "Tree Building Method:"
+                        },
+                        {
+                            "var_name": "ALIGNMENT_SCORE",
+                            "type": "dropdown",
+                            "options": ["global", "local"],
+                            "display": "Score Mode:"
+                        },
+                        {
+                            "var_name": "NORMALIZATION_MODE",
+                            "type": "dropdown",
+                            "options": ["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"],
+                            "display": "Normalization Mode:"
+                        },
+                        {
+                            "var_name": "BOOTSTRAP_TREE",
+                            "type": "switch",
+                            "display": "Bootstrap Guide Tree:"
+                        },
+                        {
+                            "var_name": "NUM_TREES",
+                            "type": "number",
+                            "display": "Number of Trees:"
+                        },
+                        {
+                            "var_name": "NOISE_SCALE",
+                            "type": "slider_float",
+                            "min": 0,
+                            "max": 100,
+                            "scale": 1000.0,
+                            "display": "Noise Scale (0 to 0.1):"
+                        },
+                        {
+                            "var_name": "title_align",
+                            "type": "title",
+                            "display": "Alignment Settings:"
+                        },
+                        {
+                            "var_name": "GAP_OPEN",
+                            "type": "negative_number",
+                            "display": "Gap Open Penalty:"
+                        },
+                        {
+                            "var_name": "GAP_EXTEND",
+                            "type": "negative_number",
+                            "display": "Gap Extend Penalty:"
+                        },
+                        {
+                            "var_name": "title_hw",
+                            "type": "title",
+                            "display": "Hardware & Workspace Settings:"
+                        },
+                        {
+                            "var_name": "WORKERS",
+                            "type": "slider",
+                            "min": 1,
+                            "max": MAX_CORES,
+                            "display": "CPU Workers:"
+                        },
+                        {
+                            "var_name": "SAFE_TEMP_DIR",
+                            "type": "folder_browser",
+                            "display": "Temporary Working Directory:"
+                        }
+                    ],
+                    "Sparse_MSA_Converter.py": [
+                        {
+                            "var_name": "title_sparse",
+                            "type": "title",
+                            "display": "Sparse MSA Converter Settings:"
+                        },
+                        {
+                            "var_name": "CONVERT_ALL",
+                            "type": "switch",
+                            "display": "Convert All Alignments:"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Multiple_Alignments"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "MSA_DIR",
+                            "display": "Input MSA (.fasta):"
+                        }
+                    ]
+                }
+            },
+            "Embedding_Tools": {
+                "is_combined": True,
+                "scripts": {
+                    "Embedding_Injection.py": [
+                        {
+                            "var_name": "title_inj",
+                            "type": "title",
+                            "display": "Embedding Injection Settings:"
+                        },
+                        {
+                            "var_name": "INPUT_EMBED",
+                            "type": "dropdown_from_folder",
+                            "folder": "Embeddings",
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "EMBED_DIR",  # <-- Added
+                            "display": "Input Embedding Set (.h5):"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "FASTA_DIR",  # <-- Added
+                            "display": "Input Sequence Set (.fasta):"
+                        }
+                    ],
+                    "Embedding_Extraction.py": [
+                        {
+                            "var_name": "title_ext",
+                            "type": "title",
+                            "display": "Embedding Extraction Settings:"
+                        },
+                        {
+                            "var_name": "INPUT_EMBED",
+                            "type": "dropdown_from_folder",
+                            "folder": "Embeddings",
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "EMBED_DIR",  # <-- Added
+                            "display": "Input Embedding Set (.h5):"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "FASTA_DIR",  # <-- Added
+                            "display": "Input Sequence Set (.fasta):"
+                        }
+                    ]
+                }
+            },
+            "Network_Tools": {
+                "is_combined": True,
+                "scripts": {
+                    "Network_Injection.py": [
+                        {
+                            "var_name": "title_net_inj",
+                            "type": "title",
+                            "display": "Network Injection Settings:"
+                        },
+                        {
+                            "var_name": "OLD_NETWORK",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Networks_EValues"),
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "NETWORK_DIR",
+                            "exclude_str": "[BLAST]",
+                            "display": "Input Network Edges (.h5):"
+                        },
+                        {
+                            "var_name": "NEW_EMBEDDINGS",
+                            "type": "dropdown_from_folder",
+                            "folder": "Embeddings",
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "EMBED_DIR",  # <-- Added
+                            "display": "Input Embedding Set (.h5):"
+                        },
+                        {
+                            "var_name": "LOCAL_GAP_P",
+                            "type": "negative_number",
+                            "display": "Local Align Gap Penalty:"
+                        },
+                        {
+                            "var_name": "GLOBAL_GAP_P",
+                            "type": "negative_number",
+                            "display": "Global Align Gap Penalty:"
+                        },
+                        {
+                            "var_name": "WORKERS",
+                            "type": "slider",
+                            "min": 1,
+                            "max": MAX_CORES,
+                            "display": "CPU Workers:"
+                        },
+                        {
+                            "var_name": "BATCH_SIZE",
+                            "type": "text",
+                            "display": "Batch Size:"
+                        }
+                    ],
+                    "Network_Extraction.py": [
+                        {
+                            "var_name": "title_net_ext",
+                            "type": "title",
+                            "display": "Network Extraction Settings:"
+                        },
+                        {
+                            "var_name": "INPUT_NET",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Networks_EValues"),
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "NETWORK_DIR",  # <-- Added
+                            "display": "Input Network Edges (.h5):"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "FASTA_DIR",  # <-- Added
+                            "display": "Input Sequence Set (.fasta):"
+                        }
+                    ]
+                }
+            },
+            "Others": {
+                "is_combined": True,
+                "scripts": {
+                    "Embedding_PWA.py": [
+                        {
+                            "var_name": "title_pwa_io",
+                            "type": "title",
+                            "display": "Input Files:"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "FASTA_DIR",
+                            "display": "Sequence Set (.fasta):"
+                        },
+                        {
+                            "var_name": "INPUT_EMBED",
+                            "type": "dropdown_from_folder",
+                            "folder": "Embeddings",
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "EMBED_DIR",
+                            "display": "Embedding Set (.h5):"
+                        },
+                        {
+                            "var_name": "title_pwa_headers",
+                            "type": "title",
+                            "display": "Target Sequences:"
+                        },
+                        {
+                            "var_name": "REF_HEADER",
+                            "type": "text",
+                            "display": "Reference Header:"
+                        },
+                        {
+                            "var_name": "REF_SEQUENCE",
+                            "type": "text",
+                            "display": "Ref Sequence (Optional):"
+                        },
+                        {
+                            "var_name": "TAR_HEADER",
+                            "type": "text",
+                            "display": "Target Header:"
+                        },
+                        {
+                            "var_name": "TAR_SEQUENCE",
+                            "type": "text",
+                            "display": "Tar Sequence (Optional):"
+                        },
+                        {
+                            "var_name": "HIGHLIGHT_POSITIONS",
+                            "type": "text",
+                            "display": "Highlight Pos (e.g., 1, 4-6):"
+                        },
+                        {
+                            "var_name": "title_pwa_params",
+                            "type": "title",
+                            "display": "Alignment Parameters:"
+                        },
+                        {
+                            "var_name": "ALIGNMENT_MODE",
+                            "type": "dropdown",
+                            "options": ["global", "local"],
+                            "display": "Alignment Mode:"
+                        },
+                        {
+                            "var_name": "LOCAL_GAP_P",
+                            "type": "negative_number",
+                            "display": "Local Align Gap Penalty:"
+                        },
+                        {
+                            "var_name": "GLOBAL_GAP_P",
+                            "type": "negative_number",
+                            "display": "Global Align Gap Penalty:"
+                        }
+                    ],
+                    "Embedding_SSEARCH.py": [
+                        {
+                            "var_name": "title_ss_io",
+                            "type": "title",
+                            "display": "Input Files:"
+                        },
+                        {
+                            "var_name": "INPUT_FASTA",
+                            "type": "dropdown_from_folder",
+                            "folder": os.path.join("Input_Files", "Sequence_Sets"),
+                            "extension": ".fasta",
+                            "include_ext": True,
+                            "dir_key": "FASTA_DIR",
+                            "display": "Sequence Set (.fasta):"
+                        },
+                        {
+                            "var_name": "INPUT_EMBED",
+                            "type": "dropdown_from_folder",
+                            "folder": "Embeddings",
+                            "extension": ".h5",
+                            "include_ext": True,
+                            "dir_key": "EMBED_DIR",
+                            "display": "Embedding Set (.h5):"
+                        },
+                        {
+                            "var_name": "title_ss_query",
+                            "type": "title",
+                            "display": "Query Parameters:"
+                        },
+                        {
+                            "var_name": "QUERY_HEADER",
+                            "type": "text",
+                            "display": "Query Header:"
+                        },
+                        {
+                            "var_name": "QUERY_SEQUENCE",
+                            "type": "text",
+                            "display": "Query Sequence (Optional):"
+                        },
+                        {
+                            "var_name": "OUTPUT_NAME",
+                            "type": "text",
+                            "display": "Output Name:"
+                        },
+                        {
+                            "var_name": "TOP_K",
+                            "type": "number",
+                            "display": "Top K Hits:"
+                        },
+                        {
+                            "var_name": "NORM_THRESHOLD",
+                            "type": "text",
+                            "display": "Norm Score Cutoff (Optional):"
+                        },
+                        {
+                            "var_name": "title_ss_params",
+                            "type": "title",
+                            "display": "Alignment Parameters:"
+                        },
+                        {
+                            "var_name": "ALIGNMENT_MODE",
+                            "type": "dropdown",
+                            "options": ["global", "local"],
+                            "display": "Alignment Mode:"
+                        },
+                        {
+                            "var_name": "NORM_MODE",
+                            "type": "dropdown",
+                            "options": ["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"],
+                            "display": "Normalization Mode:"
+                        },
+                        {
+                            "var_name": "LOCAL_GAP_P",
+                            "type": "negative_number",
+                            "display": "Local Align Gap Penalty:"
+                        },
+                        {
+                            "var_name": "GLOBAL_GAP_P",
+                            "type": "negative_number",
+                            "display": "Global Align Gap Penalty:"
+                        },
+                        {
+                            "var_name": "WORKERS",
+                            "type": "slider",
+                            "min": 1,
+                            "max": MAX_CORES,
+                            "display": "CPU Workers:"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # --- SPLIT LAYOUT ---
+        self.main_layout = QVBoxLayout(self.central_widget)
+        
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(12)
+        self.main_layout.addWidget(self.splitter)
+        
+        # --- LEFT SIDE SETUP ---
+        self.left_widget = QWidget()
+        self.left_panel = QVBoxLayout(self.left_widget)
+        self.left_panel.setContentsMargins(0, 0, 0, 0)
+        self.splitter.addWidget(self.left_widget)
+        
+        self.left_split = QSplitter(Qt.Orientation.Vertical)
+        self.left_split.setHandleWidth(12)
+        self.left_panel.addWidget(self.left_split)
+        
+        # Left Top: Tabs
+        self.left_top_widget = QWidget()
+        self.left_top_layout = QVBoxLayout(self.left_top_widget)
+        self.left_top_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.tabs = QTabWidget()
+        self.left_top_layout.addWidget(self.tabs)
+        
+        # Left Bottom: Tip Panel & Action Buttons
+        self.left_bottom_widget = QWidget()
+        self.left_bottom_layout = QVBoxLayout(self.left_bottom_widget)
+        self.left_bottom_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.tip_panel = QLabel("Hover or focus on an input to see its description.")
+        self.tip_panel.setWordWrap(True)
+        self.tip_panel.setMinimumHeight(20)
+        self.tip_panel.setStyleSheet("color: #444; font-style: italic; background-color: #e8eaed; padding: 10px; border-radius: 5px;")
+        self.left_bottom_layout.addWidget(self.tip_panel)
+        
+        btn_layout = QHBoxLayout()
+        btn_exit = QPushButton("Exit")
+        btn_exit.clicked.connect(self.close)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_exit)
+        self.left_bottom_layout.addLayout(btn_layout)
+        
+        self.left_split.addWidget(self.left_top_widget)
+        self.left_split.addWidget(self.left_bottom_widget)
+        
+        # Explicitly force the initial pixel heights (tabs get 450px, bottom gets 200px)
+        self.left_split.setSizes([450, 200])
+        
+        # Ensure that if the user resizes the window, extra space goes to the tabs
+        self.left_split.setStretchFactor(0, 1)
+        self.left_split.setStretchFactor(1, 0)
+        
+        # --- RIGHT SIDE SETUP ---
+        self.right_widget = QWidget()
+        self.right_panel = QVBoxLayout(self.right_widget)
+        self.splitter.addWidget(self.right_widget)
+        
+        self.splitter.setStretchFactor(0, 2)
+        self.splitter.setStretchFactor(1, 1)
+        
+        self.desc_title = QLabel("Script Description")
+        self.desc_title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 5px;")
+        self.right_panel.addWidget(self.desc_title)
+        
+        self.script_desc_text = QTextEdit()
+        self.script_desc_text.setReadOnly(True)
+        self.script_desc_text.setStyleSheet("background-color: #f8f9fa;")
+        font = self.script_desc_text.font()
+        font.setPointSize(10)
+        self.script_desc_text.setFont(font)
+        self.right_panel.addWidget(self.script_desc_text)
+        
+        self.script_data = {} 
+        self.tab_paths = [] 
+
+        self.tip_db = {}
+        
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        
+        self.load_utilities()
+        self.create_directories_tab()
+    
+    def create_directories_tab(self):
+        tab = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(tab)
+        
+        main_layout = QVBoxLayout(tab)
+        
+        form_widget = QWidget()
+        layout = QFormLayout(form_widget)
+        layout.setHorizontalSpacing(30)
+        layout.setVerticalSpacing(10)
+        
+        desc_label = QLabel("Global Directory Settings:")
+        desc_label.setStyleSheet("font-weight: bold; margin-bottom: 5px; font-size: 13px;")
+        layout.addRow(desc_label)
+        
+        title_lbl = QLabel("Directory Paths:")
+        title_lbl.setStyleSheet("font-weight: bold; font-size: 15px; margin-top: 15px; color: #2C3E50; border-bottom: 1px solid #3498DB; padding-bottom: 2px;")
+        layout.addRow(title_lbl)
+        
+        self.dir_inputs = {}
+        dir_defaults = {
+            "FASTA_DIR": os.path.join("Input_Files","Sequence_Sets"),
+            "MSA_DIR": os.path.join("Input_Files","Multiple_Alignments"),
+            "EMBED_DIR": os.path.join("Embeddings"),
+            "NETWORK_DIR": os.path.join("Input_Files","Networks_EValues"),
+            "PATH_DIR": os.path.join("Cache_Files","Global_Path")
+        }
+        
+        # Load existing paths from JSON if available
+        import json
+        settings_file = os.path.join("Input_Files", "tools_settings.json")
+        if os.path.exists(settings_file):
+            try:
+                with open(settings_file, "r") as f:
+                    j_data = json.load(f)
+                    if "DIRECTORIES" in j_data:
+                        dir_defaults.update(j_data["DIRECTORIES"])
+            except: pass
+            
+        dir_tips = {
+            "FASTA_DIR": "Directory containing unaligned sequence sets (.fasta).",
+            "MSA_DIR": "Directory containing multiple sequence alignments (.fasta, .pkl).",
+            "EMBED_DIR": "Directory containing language model embeddings (.h5).",
+            "NETWORK_DIR": "Directory containing SSN edge networks and E-value matrices (.h5).",
+            "PATH_DIR": "Directory for caching global paths (.h5)."
+        }
+        
+        for key, current_val in dir_defaults.items():
+            ui_element = QWidget()
+            h_lay = QHBoxLayout(ui_element)
+            h_lay.setContentsMargins(0, 0, 0, 0)
+            
+            clean_val_str = str(current_val).replace('r"', '"').replace("r'", "'").strip("\"'")
+            le = QLineEdit(clean_val_str)
+            btn = QPushButton("Browse...")
+            
+            def open_folder_dialog(checked=False, line_edit=le):
+                folder = QFileDialog.getExistingDirectory(self, "Select Directory", line_edit.text() if line_edit.text() else "")
+                if folder:
+                    import os
+                    line_edit.setText(os.path.normpath(folder))
+                    
+            btn.clicked.connect(open_folder_dialog)
+            h_lay.addWidget(le)
+            h_lay.addWidget(btn)
+            
+            display_name = key.replace('_', ' ').title()
+            display_name = display_name.replace('Msa', 'MSA').replace('Dir', 'Directory')
+            
+            lbl = QLabel(f"{display_name}:")
+            layout.addRow(lbl, ui_element)
+            self.dir_inputs[key] = le
+            
+            tip = dir_tips.get(key, "")
+            ui_element.setToolTip(tip)
+            self.tip_db[ui_element] = tip
+            self.tip_db[lbl] = tip
+            self.tip_db[le] = tip
+            ui_element.installEventFilter(self)
+            lbl.installEventFilter(self)
+            le.installEventFilter(self)
+            
+        btn_save = QPushButton("Save Directories")
+        btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 10px; margin-top: 15px;")
+        btn_save.clicked.connect(self.save_directories)
+        layout.addRow("", btn_save)
+        
+        main_layout.addWidget(form_widget)
+        main_layout.addStretch() # Pushes the form strictly to the top
+        
+        self.tabs.addTab(scroll, "Directories")
+        self.tab_paths.append("DIRECTORIES_TAB")
+
+    def save_directories(self):
+        import json
+        import os
+        
+        # Determine the absolute path of the project root (where SSN_Tools.py lives)
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        
+        new_settings = {}
+        for key, le in self.dir_inputs.items():
+            raw_path = le.text().strip()
+            # Save the path exactly as written
+            new_settings[key] = os.path.normpath(raw_path) if raw_path else ""
+            
+        settings_file = os.path.join("Input_Files", "tools_settings.json")
+        combined_settings = {}
+        os.makedirs("Input_Files", exist_ok=True)
+        if os.path.exists(settings_file):
+            try:
+                with open(settings_file, "r") as f:
+                    combined_settings = json.load(f)
+            except: pass
+            
+        combined_settings["DIRECTORIES"] = new_settings
+        
+        try:
+            with open(settings_file, "w") as f:
+                json.dump(combined_settings, f, indent=4)
+            QMessageBox.information(self, "Success", "Global directories saved to JSON successfully.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save directories:\n{e}")
+
+    def load_utilities(self):
+        utils_dir = "utilities"
+        if not os.path.exists(utils_dir):
+            QMessageBox.critical(self, "Error", f"Could not find '{utils_dir}' directory.")
+            return
+            
+        for tab_key, settings_def in self.MANUAL_SETTINGS.items():
+            if isinstance(settings_def, dict) and settings_def.get("is_combined"):
+                self.create_combined_tab(utils_dir, tab_key, settings_def["scripts"])
+            else:
+                script_path = os.path.join(utils_dir, tab_key)
+                if os.path.exists(script_path):
+                    self.create_script_tab(script_path, tab_key, settings_def)
+            
+        if self.tabs.count() > 0:
+            self.on_tab_changed(0)
+            
+    def on_tab_changed(self, index):
+        if index >= 0 and index < len(self.tab_paths):
+            path = self.tab_paths[index]
+            if path == "DIRECTORIES_TAB":
+                self.script_desc_text.setPlainText("Global directory settings for SSN Utilities. Paths defined here are automatically loaded by all utility scripts at runtime.")
+                return
+                
+            # Get the exact name of the current tab
+            tab_name = self.tabs.tabText(index)
+            
+            # Formulate the target text file paths (checking both exact match and underscore match)
+            txt_name = f"{tab_name}.txt"
+            alt_txt_name = f"{tab_name.replace(' ', '_')}.txt"
+            
+            txt_path = os.path.join("utilities", "Descriptions", txt_name)
+            alt_txt_path = os.path.join("utilities", "Descriptions", alt_txt_name)
+            
+            docstring = ""
+            
+            # 1. Try to load the exact text file
+            if os.path.exists(txt_path):
+                with open(txt_path, "r", encoding="utf-8") as f:
+                    docstring = f.read()
+            # 2. Try the underscore version if the exact one fails
+            elif os.path.exists(alt_txt_path):
+                with open(alt_txt_path, "r", encoding="utf-8") as f:
+                    docstring = f.read()
+            
+            # 3. Fallback to the Python script's internal docstring if no text file exists
+            if not docstring.strip():
+                s_data = self.script_data.get(path, {})
+                docstring = s_data.get('docstring', '')
+                
+                # 4. Final placeholder if absolutely nothing is found
+                if not docstring.strip():
+                    docstring = f"No documentation file found for this tab.\n\nTo add one, create a text file named:\nutilities\\Descriptions\\{txt_name}"
+            
+            self.script_desc_text.setPlainText(docstring.strip())
+            
+    def _populate_script_layout(self, layout, script_name, script_path, script_settings_def, source, tree):
+        defined_vars = {item["var_name"]: item for item in script_settings_def}
+        settings = []
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id in defined_vars:
+                        val_str = ast.get_source_segment(source, node.value)
+                        
+                        # First get the hardcoded default via AST
+                        try:
+                            default_val = ast.literal_eval(node.value)
+                        except Exception:
+                            default_val = val_str.strip("\"'")
+                            
+                        actual_val = default_val
+                        
+                        # Then, try to overwrite it with the nested JSON value if it exists
+                        settings_path = os.path.join("Input_Files", "tools_settings.json")
+                        if os.path.exists(settings_path):
+                            try:
+                                with open(settings_path, "r") as f:
+                                    j_data = json.load(f)
+                                    if script_name in j_data and target.id in j_data[script_name]:
+                                        actual_val = j_data[script_name][target.id]
+                            except: pass
+                            
+                        settings.append({
+                            'name': target.id, 'value': val_str, 'actual_val': actual_val,
+                            'lineno': node.lineno, 'node': node, 'def': defined_vars[target.id]
+                        })
+                        
+        if len(settings) == 0:
+            return
+            
+        inputs = {}
+        skip_vars = set()
+        for s_def in script_settings_def:
+            if s_def['type'] == "title":
+                title_lbl = QLabel(s_def['display'])
+                title_lbl.setStyleSheet("font-weight: bold; font-size: 15px; margin-top: 15px; color: #2C3E50; border-bottom: 1px solid #3498DB; padding-bottom: 2px;")
+                layout.addRow(title_lbl)
+                continue
+                
+            var_name = s_def['var_name']
+            if var_name in skip_vars:
+                continue
+                
+            if var_name == "EDGE_PREFILTERING":
+                # Create the switch button
+                switch_btn = QPushButton()
+                switch_btn.setCheckable(True)
+                switch_btn.setFixedSize(60, 28)
+                
+                def switch_toggle_style(checked, btn=switch_btn):
+                    if checked:
+                        btn.setText("ON")
+                        btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 14px; font-weight: bold; border: 1px solid #388E3C; }")
+                    else:
+                        btn.setText("OFF")
+                        btn.setStyleSheet("QPushButton { background-color: #e0e0e0; color: #333; border-radius: 14px; font-weight: bold; border: 1px solid #bdbdbd; }")
+                
+                switch_btn.toggled.connect(switch_toggle_style)
+                switch_btn.setChecked(bool(actual_val))
+                switch_toggle_style(bool(actual_val))
+                
+                # Get tooltip for prefiltering
+                prefilter_tip = self.SCRIPT_TIPS.get(script_name, {}).get("EDGE_PREFILTERING", "Edge Prefiltering")
+                switch_btn.setToolTip(prefilter_tip)
+                self.tip_db[switch_btn] = prefilter_tip
+                switch_btn.installEventFilter(self)
+                
+                # Create the slider + spinbox
+                strength_def = next((d for d in script_settings_def if d.get('var_name') == 'PREFILTER_STRENGTH'), None)
+                strength_setting = next((s for s in settings if s['name'] == 'PREFILTER_STRENGTH'), None)
+                
+                if strength_def and strength_setting:
+                    skip_vars.add("PREFILTER_STRENGTH")
+                    strength_actual_val = strength_setting['actual_val']
+                    
+                    strength_widget = QWidget()
+                    strength_lay = QHBoxLayout(strength_widget)
+                    strength_lay.setContentsMargins(0, 0, 0, 0)
+                    
+                    sl = NoScrollSlider(Qt.Orientation.Horizontal)
+                    sl.setMinimum(strength_def['min'])
+                    sl.setMaximum(strength_def['max'])
+                    
+                    box = NoScrollSpinBox()
+                    box.setRange(strength_def['min'], strength_def['max'])
+                    box.setFixedWidth(60)
+                    
+                    try: 
+                        val = int(strength_actual_val)
+                        sl.setValue(val)
+                        box.setValue(val)
+                    except: 
+                        pass
+                    
+                    sl.setTickPosition(QSlider.TickPosition.TicksBelow)
+                    sl.setTickInterval(10)
+                    
+                    sl.valueChanged.connect(box.setValue)
+                    box.valueChanged.connect(sl.setValue)
+                    
+                    strength_lay.addWidget(sl)
+                    strength_lay.addWidget(box)
+                    strength_widget.slider = sl
+                    
+                    strength_tip = self.SCRIPT_TIPS.get(script_name, {}).get("PREFILTER_STRENGTH", "Strength (%)")
+                    strength_widget.setToolTip(strength_tip)
+                    self.tip_db[strength_widget] = strength_tip
+                    strength_widget.installEventFilter(self)
+                    
+                    sl.setToolTip(strength_tip)
+                    self.tip_db[sl] = strength_tip
+                    sl.installEventFilter(self)
+                    
+                    box.setToolTip(strength_tip)
+                    self.tip_db[box] = strength_tip
+                    box.installEventFilter(self)
+                else:
+                    strength_widget = None
+                
+                # Assemble in compound widget
+                compound_widget = QWidget()
+                compound_lay = QHBoxLayout(compound_widget)
+                compound_lay.setContentsMargins(0, 0, 0, 0)
+                compound_lay.setSpacing(10)
+                compound_lay.addWidget(switch_btn)
+                
+                if strength_widget:
+                    strength_lbl = QLabel("  Strength (%):")
+                    compound_lay.addWidget(strength_lbl)
+                    compound_lay.addWidget(strength_widget)
+                    
+                    # Tooltip for the label
+                    strength_lbl.setToolTip(strength_tip)
+                    self.tip_db[strength_lbl] = strength_tip
+                    strength_lbl.installEventFilter(self)
+                    
+                    # Connect switch to enable/disable the strength widget
+                    def update_strength_state(checked, sl_ref=sl, w_ref=strength_widget):
+                        w_ref.setEnabled(checked)
+                        if checked and sl_ref.value() == 0:
+                            sl_ref.setValue(20)
+                    
+                    switch_btn.toggled.connect(update_strength_state)
+                    update_strength_state(switch_btn.isChecked())
+                    
+                    # Connect slider changes to automatically toggle switch off if value is 0
+                    def on_strength_changed(val, btn_ref=switch_btn):
+                        if val == 0:
+                            btn_ref.setChecked(False)
+                    sl.valueChanged.connect(on_strength_changed)
+                    
+                    # Register strength in inputs
+                    inputs["PREFILTER_STRENGTH"] = {'widget': strength_widget, 'type': 'slider'}
+                
+                # Create label for the row
+                label = QLabel(s_def['display'])
+                label.setToolTip(prefilter_tip)
+                self.tip_db[label] = prefilter_tip
+                label.installEventFilter(self)
+                
+                layout.addRow(label, compound_widget)
+                inputs["EDGE_PREFILTERING"] = {'widget': switch_btn, 'type': 'switch'}
+                continue
+
+            if var_name == "ENABLE_LENGTH_FILTER":
+                # Create the switch button for length filter
+                filter_btn = QPushButton()
+                filter_btn.setCheckable(True)
+                filter_btn.setFixedSize(60, 28)
+                
+                def switch_toggle_style_filter(checked, btn=filter_btn):
+                    if checked:
+                        btn.setText("ON")
+                        btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 14px; font-weight: bold; border: 1px solid #388E3C; }")
+                    else:
+                        btn.setText("OFF")
+                        btn.setStyleSheet("QPushButton { background-color: #e0e0e0; color: #333; border-radius: 14px; font-weight: bold; border: 1px solid #bdbdbd; }")
+                
+                filter_btn.toggled.connect(switch_toggle_style_filter)
+                filter_btn.setChecked(bool(actual_val))
+                switch_toggle_style_filter(bool(actual_val))
+                
+                filter_tip = self.SCRIPT_TIPS.get(script_name, {}).get("ENABLE_LENGTH_FILTER", "Enable Length Filter")
+                filter_btn.setToolTip(filter_tip)
+                self.tip_db[filter_btn] = filter_tip
+                filter_btn.installEventFilter(self)
+                
+                # Create the overwrite switch
+                overwrite_def = next((d for d in script_settings_def if d.get('var_name') == 'OVER_WRITE'), None)
+                overwrite_setting = next((s for s in settings if s['name'] == 'OVER_WRITE'), None)
+                
+                if overwrite_def and overwrite_setting:
+                    skip_vars.add("OVER_WRITE")
+                    overwrite_actual_val = overwrite_setting['actual_val']
+                    
+                    overwrite_btn = QPushButton()
+                    overwrite_btn.setCheckable(True)
+                    overwrite_btn.setFixedSize(60, 28)
+                    
+                    def switch_toggle_style_overwrite(checked, btn=overwrite_btn):
+                        if checked:
+                            btn.setText("ON")
+                            btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 14px; font-weight: bold; border: 1px solid #388E3C; }")
+                        else:
+                            btn.setText("OFF")
+                            btn.setStyleSheet("QPushButton { background-color: #e0e0e0; color: #333; border-radius: 14px; font-weight: bold; border: 1px solid #bdbdbd; }")
+                    
+                    overwrite_btn.toggled.connect(switch_toggle_style_overwrite)
+                    overwrite_btn.setChecked(bool(overwrite_actual_val))
+                    switch_toggle_style_overwrite(bool(overwrite_actual_val))
+                    
+                    overwrite_tip = self.SCRIPT_TIPS.get(script_name, {}).get("OVER_WRITE", "Overwrite Original File")
+                    overwrite_btn.setToolTip(overwrite_tip)
+                    self.tip_db[overwrite_btn] = overwrite_tip
+                    overwrite_btn.installEventFilter(self)
+                else:
+                    overwrite_btn = None
+                
+                # Assemble in compound widget
+                compound_widget = QWidget()
+                compound_lay = QHBoxLayout(compound_widget)
+                compound_lay.setContentsMargins(0, 0, 0, 0)
+                compound_lay.setSpacing(10)
+                compound_lay.addWidget(filter_btn)
+                
+                if overwrite_btn:
+                    compound_lay.addStretch(1)
+                    overwrite_lbl = QLabel("Overwrite Original File:")
+                    compound_lay.addWidget(overwrite_lbl)
+                    compound_lay.addWidget(overwrite_btn)
+                    compound_lay.addStretch(1)
+                    
+                    overwrite_lbl.setToolTip(overwrite_tip)
+                    self.tip_db[overwrite_lbl] = overwrite_tip
+                    overwrite_lbl.installEventFilter(self)
+                    
+                    inputs["OVER_WRITE"] = {'widget': overwrite_btn, 'type': 'switch'}
+                
+                # Create label for the row
+                label = QLabel(s_def['display'])
+                label.setToolTip(filter_tip)
+                self.tip_db[label] = filter_tip
+                label.installEventFilter(self)
+                
+                layout.addRow(label, compound_widget)
+                inputs["ENABLE_LENGTH_FILTER"] = {'widget': filter_btn, 'type': 'switch'}
+                continue
+                
+            setting = next((s for s in settings if s['name'] == var_name), None)
+            if not setting: continue
+            
+            actual_val = setting['actual_val']
+            ui_element = None
+            
+            if s_def['type'] == "dropdown":
+                ui_element = NoScrollComboBox()
+                ui_element.addItems(s_def['options'])
+                idx = ui_element.findText(str(actual_val))
+                if idx >= 0: ui_element.setCurrentIndex(idx)
+                
+            elif s_def['type'] == "dropdown_from_folder":
+                ui_element = QWidget()
+                h_lay = QHBoxLayout(ui_element)
+                h_lay.setContentsMargins(0, 0, 0, 0)
+
+                folder = s_def['folder']
+                ext = s_def['extension']
+                include_ext = s_def.get('include_ext', False)
+                dir_key = s_def.get('dir_key')
+                exclude_str = s_def.get('exclude_str', None) # <-- Fetch exclusion
+                
+                combo = DynamicComboBox(folder, ext, include_ext, exclude_str) # <-- Pass it in
+                
+                # Override the populate method to fetch the live directory path right before opening
+                original_populate = combo.populate
+                
+                # By passing them as default arguments (c=combo, dk=dir_key, op=original_populate), 
+                # Python locks in their values instantly during the loop!
+                def dynamic_populate(c=combo, dk=dir_key, op=original_populate):
+                    if dk and hasattr(self, 'dir_inputs') and dk in self.dir_inputs:
+                        c.folder = self.dir_inputs[dk].text()
+                    op()
+                    
+                combo.populate = dynamic_populate
+                
+                # Initial population
+                combo.populate()
+                clean_val = str(actual_val).replace('"','')
+                idx = combo.findText(clean_val)
+                if idx >= 0: combo.setCurrentIndex(idx)
+                
+                # Add the folder button
+                btn = QPushButton("📂")
+                btn.setFixedWidth(30)
+                btn.setToolTip("Open Folder")
+                def open_folder(checked, dk=dir_key, df=folder):
+                    import os
+                    from PyQt6.QtGui import QDesktopServices
+                    from PyQt6.QtCore import QUrl
+                    path = self.dir_inputs[dk].text() if dk and hasattr(self, 'dir_inputs') and dk in self.dir_inputs else df
+                    abs_path = os.path.abspath(path)
+                    os.makedirs(abs_path, exist_ok=True)
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(abs_path))
+                btn.clicked.connect(open_folder)
+                
+                h_lay.addWidget(combo)
+                h_lay.addWidget(btn)
+                
+                ui_element.combo = combo # Save a reference so save_and_run can extract the text
+                
+            elif s_def['type'] == "switch":
+                ui_element = QPushButton()
+                ui_element.setCheckable(True)
+                ui_element.setFixedSize(60, 28)
+                
+                def switch_toggle_style(checked, btn=ui_element):
+                    if checked:
+                        btn.setText("ON")
+                        btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 14px; font-weight: bold; border: 1px solid #388E3C; }")
+                    else:
+                        btn.setText("OFF")
+                        btn.setStyleSheet("QPushButton { background-color: #e0e0e0; color: #333; border-radius: 14px; font-weight: bold; border: 1px solid #bdbdbd; }")
+                
+                ui_element.toggled.connect(switch_toggle_style)
+                ui_element.setChecked(bool(actual_val))
+                switch_toggle_style(bool(actual_val)) 
+                
+            elif s_def['type'] == "slider":
+                ui_element = QWidget()
+                h_lay = QHBoxLayout(ui_element)
+                h_lay.setContentsMargins(0, 0, 0, 0)
+                
+                sl = NoScrollSlider(Qt.Orientation.Horizontal)
+                sl.setMinimum(s_def['min'])
+                sl.setMaximum(s_def['max'])
+                
+                # Replace QLabel with NoScrollSpinBox
+                box = NoScrollSpinBox()
+                box.setRange(s_def['min'], s_def['max'])
+                box.setFixedWidth(60)
+                
+                try: 
+                    val = int(actual_val)
+                    sl.setValue(val)
+                    box.setValue(val)
+                except: 
+                    pass
+                
+                sl.setTickPosition(QSlider.TickPosition.TicksBelow)
+                sl.setTickInterval(1)
+                
+                # Two-way signal binding
+                sl.valueChanged.connect(box.setValue)
+                box.valueChanged.connect(sl.setValue)
+                
+                h_lay.addWidget(sl)
+                h_lay.addWidget(box)
+                ui_element.slider = sl
+                
+            elif s_def['type'] == "slider_float":
+                ui_element = QWidget()
+                h_lay = QHBoxLayout(ui_element)
+                h_lay.setContentsMargins(0, 0, 0, 0)
+                
+                sl = NoScrollSlider(Qt.Orientation.Horizontal)
+                vmin = s_def.get('min', 0)
+                vmax = s_def.get('max', 100)
+                scale = s_def.get('scale', 1000.0) 
+                
+                sl.setMinimum(vmin)
+                sl.setMaximum(vmax)
+                
+                # Replace QLabel with NoScrollDoubleSpinBox
+                box = NoScrollDoubleSpinBox()
+                box.setRange(vmin / scale, vmax / scale)
+                box.setDecimals(3) # Set to 3 to accommodate a scale of 1000.0 safely
+                box.setSingleStep(1.0 / scale)
+                box.setFixedWidth(70)
+                
+                try: 
+                    sl_val = int(float(actual_val) * scale)
+                    sl.setValue(sl_val)
+                    box.setValue(float(actual_val))
+                except: 
+                    pass
+                
+                sl.setTickPosition(QSlider.TickPosition.TicksBelow)
+                sl.setTickInterval(10)
+                
+                # Two-way signal binding with scaling math
+                sl.valueChanged.connect(lambda v, b=box, sc=scale: b.setValue(v / sc))
+                box.valueChanged.connect(lambda v, s=sl, sc=scale: s.setValue(int(v * sc)))
+                
+                h_lay.addWidget(sl)
+                h_lay.addWidget(box)
+                ui_element.slider = sl
+                ui_element.scale = scale
+                
+            elif s_def['type'] == "negative_number":
+                ui_element = NoScrollDoubleSpinBox()
+                ui_element.setMinimum(-1000.0)
+                ui_element.setMaximum(0.0)
+                ui_element.setDecimals(1)
+                ui_element.setSingleStep(0.5)
+                try: ui_element.setValue(float(actual_val))
+                except: pass
+                
+            elif s_def['type'] == "number":
+                ui_element = NoScrollSpinBox()
+                ui_element.setRange(0, 999999)
+                try: ui_element.setValue(int(actual_val))
+                except: pass
+
+            elif s_def['type'] == "folder_browser":
+                ui_element = QWidget()
+                h_lay = QHBoxLayout(ui_element)
+                h_lay.setContentsMargins(0, 0, 0, 0)
+                
+                clean_val_str = str(actual_val).replace('r"', '"').replace("r'", "'").strip("\"'")
+                
+                le = QLineEdit(clean_val_str)
+                btn = QPushButton("Browse...")
+                
+                def open_folder_dialog(checked=False, line_edit=le):
+                    folder = QFileDialog.getExistingDirectory(self, "Select Directory", line_edit.text() if line_edit.text() else "")
+                    if folder:
+                        import os
+                        folder = os.path.normpath(folder)
+                        line_edit.setText(folder)
+                        
+                btn.clicked.connect(open_folder_dialog)
+                h_lay.addWidget(le)
+                h_lay.addWidget(btn)
+                ui_element.line_edit = le
+                
+            else:
+                ui_element = QLineEdit(str(actual_val))
+            
+            script_dict = self.SCRIPT_TIPS.get(script_name, {})
+            tip = script_dict.get(var_name, f"Setting: {var_name}")
+                
+            ui_element.setToolTip(tip)
+            self.tip_db[ui_element] = tip
+            ui_element.installEventFilter(self)
+            
+            label = QLabel(s_def['display'])
+            self.tip_db[label] = tip
+            label.installEventFilter(self)
+            
+            if hasattr(ui_element, 'layout') and ui_element.layout() is not None:
+                 for child in ui_element.children():
+                     if child.isWidgetType():
+                         self.tip_db[child] = tip
+                         child.installEventFilter(self)
+            
+            layout.addRow(label, ui_element)
+            inputs[var_name] = {'widget': ui_element, 'type': s_def['type']}
+            
+        self.script_data[script_path] = {'inputs': inputs, 'settings': settings}
+        
+        if script_name == "Embedding_MSA.py":
+            net_input = inputs.get("INPUT_NETWORK")
+            score_input = inputs.get("ALIGNMENT_SCORE")
+            norm_input = inputs.get("NORMALIZATION_MODE")
+            bootstrap_input = inputs.get("BOOTSTRAP_TREE")
+            num_trees_input = inputs.get("NUM_TREES")
+            noise_scale_input = inputs.get("NOISE_SCALE")
+            temp_dir_input = inputs.get("SAFE_TEMP_DIR")
+            tree_method_input = inputs.get("TREE_METHOD")
+            
+            if net_input and score_input and norm_input:
+                net_combo = net_input['widget'].combo # Get the underlying QComboBox
+                score_combo = score_input['widget']
+                norm_combo = norm_input['widget']
+                
+                def update_msa_toggles(text):
+                    is_blast = "blast" in text.lower()
+                    
+                    score_combo.setEnabled(not is_blast)
+                    norm_combo.setEnabled(not is_blast)
+                    
+                    score_combo.blockSignals(True)
+                    norm_combo.blockSignals(True)
+                    if is_blast:
+                        score_combo.setCurrentIndex(-1)
+                        norm_combo.setCurrentIndex(-1)
+                    else:
+                        if score_combo.currentIndex() == -1: score_combo.setCurrentText("global")
+                        if norm_combo.currentIndex() == -1: norm_combo.setCurrentText("alignment_length")
+                    score_combo.blockSignals(False)
+                    norm_combo.blockSignals(False)
+                    
+                net_combo.currentTextChanged.connect(update_msa_toggles)
+                update_msa_toggles(net_combo.currentText()) # Trigger once on load
+                
+            if bootstrap_input and num_trees_input and noise_scale_input and temp_dir_input:
+                bootstrap_switch = bootstrap_input['widget']
+                num_trees_widget = num_trees_input['widget']
+                noise_scale_widget = noise_scale_input['widget']
+                temp_dir_widget = temp_dir_input['widget']
+                
+                def update_bootstrap_toggles(checked):
+                    num_trees_widget.setEnabled(checked)
+                    noise_scale_widget.setEnabled(checked)
+                    temp_dir_widget.setEnabled(checked)
+                    
+                bootstrap_switch.toggled.connect(update_bootstrap_toggles)
+                update_bootstrap_toggles(bootstrap_switch.isChecked())
+                
+            if tree_method_input and bootstrap_input:
+                tree_method_combo = tree_method_input['widget']
+                bootstrap_switch = bootstrap_input['widget']
+                
+                def update_tree_method_toggles(text):
+                    is_nj = "neighbor-joining" in text.lower()
+                    if is_nj:
+                        bootstrap_switch.setChecked(False)
+                        bootstrap_switch.setEnabled(False)
+                    else:
+                        bootstrap_switch.setEnabled(True)
+                        
+                tree_method_combo.currentTextChanged.connect(update_tree_method_toggles)
+                update_tree_method_toggles(tree_method_combo.currentText()) # Trigger once on load
+        
+        if script_name == "Sparse_MSA_Converter.py":
+            conv_all_input = inputs.get("CONVERT_ALL")
+            fasta_input = inputs.get("INPUT_FASTA")
+            
+            if conv_all_input and fasta_input:
+                conv_all_switch = conv_all_input['widget'] 
+                fasta_combo = fasta_input['widget'].combo # Extract the underlying combobox
+                
+                def update_convert_all(checked):
+                    # Grey out the dropdown if Convert All is ON
+                    fasta_combo.setEnabled(not checked)
+                    
+                    if checked:
+                        # Clear the selection to indicate it's empty/inactive
+                        fasta_combo.setCurrentIndex(-1)
+                        
+                conv_all_switch.toggled.connect(update_convert_all)
+                update_convert_all(conv_all_switch.isChecked()) # Trigger once on load
+        
+        if script_name == "Sanitize_Sequences.py":
+            filter_input = inputs.get("ENABLE_LENGTH_FILTER")
+            min_input = inputs.get("MIN_SEQ_LENGTH")
+            max_input = inputs.get("MAX_SEQ_LENGTH")
+            
+            if filter_input and min_input and max_input:
+                filter_switch = filter_input['widget'] 
+                min_spinbox = min_input['widget'] 
+                max_spinbox = max_input['widget']
+                
+                def update_length_filters(checked):
+                    min_spinbox.setEnabled(checked)
+                    max_spinbox.setEnabled(checked)
+                    
+                    if not checked:
+                        # QSpinBox doesn't inherently support 'empty' strings, so we set the minimum value (0) 
+                        # to display a blank space using the SpecialValueText property.
+                        min_spinbox.setSpecialValueText(" ")
+                        max_spinbox.setSpecialValueText(" ")
+                        min_spinbox.setValue(0)
+                        max_spinbox.setValue(0)
+                    else:
+                        # Clear the override so numbers show up normally again
+                        min_spinbox.setSpecialValueText("") 
+                        max_spinbox.setSpecialValueText("")
+                        
+                filter_switch.toggled.connect(update_length_filters)
+                update_length_filters(filter_switch.isChecked()) # Trigger once on load
+
+        btn_run = QPushButton(f"Save && Run {script_name}")
+        btn_run.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 10px; margin-top: 15px;")
+        btn_run.clicked.connect(lambda checked, sp=script_path: self.save_and_run(sp))
+        layout.addRow("", btn_run)
+            
+    def create_combined_tab(self, utils_dir, tab_key, scripts_dict):
+        tab = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(tab)
+        
+        main_layout = QVBoxLayout(tab)
+        
+        combined_docstring = ""
+        script_idx = 0
+        
+        for script_name, script_settings_def in scripts_dict.items():
+            script_path = os.path.join(utils_dir, script_name)
+            if not os.path.exists(script_path): continue
+                
+            with open(script_path, "r", encoding="utf-8") as f:
+                source = f.read()
+            
+            try: tree = ast.parse(source)
+            except SyntaxError: continue
+                
+            docstring = ast.get_docstring(tree) or ""
+            if not combined_docstring: combined_docstring = docstring
+                
+            if script_idx > 0:
+                from PyQt6.QtWidgets import QFrame
+                line = QFrame()
+                line.setFrameShape(QFrame.Shape.HLine)
+                line.setFrameShadow(QFrame.Shadow.Sunken)
+                line.setStyleSheet("margin-top: 15px; margin-bottom: 5px; color: #aaaaaa;")
+                main_layout.addWidget(line)
+            
+            form_widget = QWidget()
+            layout = QFormLayout(form_widget)
+            layout.setHorizontalSpacing(30)
+            layout.setVerticalSpacing(10)
+            
+            desc_label = QLabel(f"Modify configuration for {script_name}:")
+            desc_label.setStyleSheet("font-weight: bold; margin-bottom: 5px; font-size: 13px;")
+            layout.addRow(desc_label)
+            
+            self._populate_script_layout(layout, script_name, script_path, script_settings_def, source, tree)
+            main_layout.addWidget(form_widget)
+            script_idx += 1
+            
+        pseudo_path = os.path.join(utils_dir, tab_key) + "_GUI_tab" 
+        self.script_data[pseudo_path] = {'inputs': {}, 'settings': [], 'docstring': combined_docstring}
+        self.tab_paths.append(pseudo_path)
+        
+        tab_name = tab_key.replace("_", " ")
+        self.tabs.addTab(scroll, tab_name)
+
+    def create_script_tab(self, script_path, script_name, script_settings_def=None):
+        with open(script_path, "r", encoding="utf-8") as f:
+            source = f.read()
+            
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            print(f"Syntax error in {script_name}, skipping.")
+            return
+            
+        docstring = ast.get_docstring(tree) or ""
+            
+        if script_name not in self.MANUAL_SETTINGS:
+            return
+            
+        script_settings_def = self.MANUAL_SETTINGS[script_name]
+        
+        tab = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(tab)
+        
+        main_layout = QVBoxLayout(tab)
+        
+        form_widget = QWidget()
+        layout = QFormLayout(form_widget)
+        layout.setHorizontalSpacing(30)
+        layout.setVerticalSpacing(10)
+        
+        desc_label = QLabel(f"Modify configuration for {script_name}:")
+        desc_label.setStyleSheet("font-weight: bold; margin-bottom: 5px; font-size: 13px;")
+        layout.addRow(desc_label)
+
+        self._populate_script_layout(layout, script_name, script_path, script_settings_def, source, tree)
+        
+        main_layout.addWidget(form_widget)
+        main_layout.addStretch() # Pushes the form strictly to the top
+        
+        self.tab_paths.append(script_path)
+        self.script_data[script_path]['docstring'] = docstring
+        
+        tab_name = script_name.replace(".py", "").replace("_", " ")
+        self.tabs.addTab(scroll, tab_name)
+
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        if event.type() in (QEvent.Type.FocusIn, QEvent.Type.MouseButtonPress, QEvent.Type.Enter):
+            tip = self.tip_db.get(obj, None)
+            if tip:
+                self.tip_panel.setText(tip)
+        return super().eventFilter(obj, event)
+
+    def save_and_run(self, script_path):
+        import json
+        data = self.script_data[script_path]
+        inputs = data['inputs']
+        settings = data['settings']
+        
+        # 1. Collect current values from GUI
+        new_settings = {}
+        for s in settings:
+            var_name = s['name']
+            input_data = inputs[var_name]
+            widget = input_data['widget']
+            w_type = input_data['type']
+            
+            if w_type in ["dropdown", "dropdown_from_folder"]:
+                if w_type == "dropdown_from_folder":
+                    val = widget.combo.currentText()
+                else:
+                    val = widget.currentText()
+                    
+                if w_type == "dropdown_from_folder" and s['def'].get('include_ext', False):
+                    if val and not val.endswith(s['def']['extension']):
+                        val += s['def']['extension']
+                new_settings[var_name] = val
+            elif w_type == "switch":
+                new_settings[var_name] = widget.isChecked()
+            elif w_type == "slider":
+                new_settings[var_name] = int(widget.slider.value())
+            elif w_type == "slider_float":
+                new_settings[var_name] = float(widget.slider.value() / widget.scale)
+            elif w_type == "negative_number":
+                new_settings[var_name] = float(widget.value())
+            elif w_type == "number":
+                new_settings[var_name] = int(widget.value())
+            elif w_type == "folder_browser":
+                raw_path = widget.line_edit.text().strip()
+                new_settings[var_name] = os.path.normpath(raw_path) if raw_path else ""
+            else:
+                new_settings[var_name] = widget.text()
+                
+        # 2. Load existing JSON to avoid overwriting unrelated settings
+        settings_file = os.path.join("Input_Files", "tools_settings.json")
+        combined_settings = {}
+        os.makedirs("Input_Files", exist_ok=True)
+        if os.path.exists(settings_file):
+            try:
+                with open(settings_file, "r") as f:
+                    combined_settings = json.load(f)
+            except: pass
+            
+        # 3. Update and Save (NESTED BY SCRIPT NAME)
+        script_name = os.path.basename(script_path)
+        if script_name not in combined_settings:
+            combined_settings[script_name] = {}
+            
+        combined_settings[script_name].update(new_settings)
+        
+        try:
+            with open(settings_file, "w") as f:
+                json.dump(combined_settings, f, indent=4)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save JSON settings:\n{e}")
+            return
+            
+        # 4. Run the script
+        try:
+            print(f"Executing: {script_name}")
+            
+            if os.name == 'nt':
+                creationflags = subprocess.CREATE_NEW_CONSOLE
+                subprocess.Popen(["cmd.exe", "/k", sys.executable, script_name], creationflags=creationflags, cwd=os.path.dirname(script_path))
+            else:
+                subprocess.Popen(["xterm", "-hold", "-e", f"{sys.executable} {script_name}"], cwd=os.path.dirname(script_path))
+            
+            QMessageBox.information(self, "Success", f"Saved configuration to JSON and launched {script_name}.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to run {script_path}:\n{e}")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    window = ToolsGUI()
+    window.show()
+    sys.exit(app.exec())

@@ -1,0 +1,23 @@
+=== SANITIZE SEQUENCES (Sanitize_Sequences.py) ===
+
+Description:
+This script prepares a raw FASTA file of protein sequences for downstream embedding generation and similarity calculations. It ensures sequence integrity by standardizing all amino acid characters to uppercase, removing leading or trailing non-standard symbols, and replacing internal invalid characters or gaps with the 'X' mask token. In addition, it filters out sequences that fall outside a specified minimum and maximum length threshold to remove fragment and outlier sequences. After processing, it generates a histogram visualizing the length distribution of the sanitized sequence set.
+
+Parameters:
+- INPUT_FASTA: The input sequence file (in FASTA format) to be sanitized.
+- ENABLE_LENGTH_FILTER: A toggle indicating whether sequences should be filtered by their amino acid length.
+- OVER_WRITE: If set to ON, the original input file will be overwritten with the sanitized sequences. If OFF, a new file with the suffix '_sanitized.fasta' will be generated.
+- MIN_SEQ_LENGTH: The minimum sequence length (number of residues) required for a sequence to be retained. Shorter sequences are discarded.
+- MAX_SEQ_LENGTH: The maximum sequence length (number of residues) permitted for a sequence to be retained. Longer sequences are discarded.
+
+==================================================
+
+=== GENERATE EMBEDDINGS (Generate_Embeddings.py) ===
+
+Description:
+This script computes dense, high-dimensional vector representations (embeddings) for each protein sequence using pre-trained protein Language Models (pLMs). These embeddings capture the structural, evolutionary, and biophysical properties of the sequences at a residue level. The embeddings are stored in a serialized HDF5 database, where each sequence is mapped to a dataset containing its residue-level embeddings. This HDF5 format allows high-performance downstream similarity matrix and alignment computations.
+
+Parameters:
+- INPUT_FASTA: The sanitized input sequence FASTA file to generate embeddings for.
+- MODEL_NAME: The protein language model to load. Choices include ESM-C models (esmc_300m, esmc_600m), ProtBERT, or ProstT5. Larger models capture richer features but require more GPU memory and processing time.
+- SAVING_MODE: The floating-point precision for storing the embedding tensors. 'float16' is recommended as it halves file size and memory requirements with minimal loss in representation precision, whereas 'float32' retains standard uncompressed precision.

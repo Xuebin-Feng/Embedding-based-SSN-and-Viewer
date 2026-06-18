@@ -1,0 +1,1041 @@
+"""
+File: Embedding_MSA.py
+===================================
+Description:
+This script performs a Multiple Sequence Alignment (MSA) heavily optimized around protein language model (pLM) embeddings.
+Traditional tools like MAFFT and MUSCLE rely solely on amino acid substitution matrices. This tool instead calculates mathematical 
+consensus averages of structural embeddings to align sequences, often performing better on sequences with extremely low literal identity.
+
+It implements a robust "auto-intersection" algorithm. It looks at the Network File (Topology/Scores), the Embeddings File, 
+and the sequence FASTA file, determines exactly which sequences are common to all three, and dynamically restricts its operations 
+only to that intersection.
+
+Input:
+- Network File HDF5: Used to construct the evolutionary guide tree utilizing existing alignment scores (`INPUT_NETWORK`).
+- Embeddings HDF5: Supplies the dense tensor representations of each sequence used during the active alignment phase (`INPUT_EMBED`).
+- Sequence FASTA: The actual structural letters to be aligned and padded with gaps (`INPUT_FASTA`).
+
+Output:
+- A completed Multiple Sequence Alignment FASTA file padded with '-' gap characters (`OUTPUT_FASTA`).
+
+Settings:
+- TARGET_SET: A prefix for the output MSA file name.
+- PARENT_SET: The prefix shared by the broader input files to pull from.
+- MODEL_NAME: The model used for the embeddings.
+- ALIGNMENT_SCORE: Whether to weight the guide tree based on "global" or "local" connectivity scores from the network.
+- NUM_WORKERS: CPU threads for parallel bootstrap generation of the consensus tree.
+- NUM_TREES: How many bootstrap replicate iterations to average for the consensus guide tree (higher = more stable topology).
+- NOISE_SCALE: Standard deviation of structural noise applied during bootstrap resampling.
+- GAP_OPEN: Penalty scoring for opening gaps in the sequence.
+
+Algorithm:
+1. Loads IDs from all three inputs and computes the mathematical intersection set.
+2. Constructs a dense square distance matrix utilizing ONLY the pairwise connectivity scores explicitly found in the input network.
+3. Builds an ensemble of randomized bootstrap neighbor-joining trees from the distance matrix (simulated via structural noise addition).
+4. Computes the geometric average (consensus) graph of all random bootstraps to form the master guide tree.
+5. In ascending order of linkage closeness, extracts sequence pairs/groups.
+6. Averages the numerical embedding vectors of groups utilizing sequence-length mathematical weights.
+7. Aligns the resultant averaged arrays using Needleman-Wunsch dynamic programming and PyTorch CDist evaluation.
+8. Distributes the calculated optimal gap padding into all underlying string literal FASTA sequences.
+9. Saves the final alignment block.
+"""
+# %% --- Imports ---
+import os
+import shutil  
+import gc      
+import h5py
+import numpy as np
+import torch
+import scipy.cluster.hierarchy as sch
+from scipy.spatial.distance import squareform
+import multiprocessing as mp
+from functools import partial
+from numba import jit
+from tqdm import tqdm
+import sys
+import Hardware_Utils
+from sklearn.isotonic import IsotonicRegression
+from scipy.stats import spearmanr
+from sklearn.metrics import r2_score
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+
+# Inputs - Now using .h5
+INPUT_FASTA   = None
+INPUT_EMBED   = None
+INPUT_NETWORK = None
+
+# Metric for Guide Tree: "local" or "global"
+ALIGNMENT_SCORE = "global"
+NORMALIZATION_MODE = "alignment_length" # (alignment_length, shorter_sequence, longer_sequence, average_sequence)
+TREE_METHOD = "UPGMA (Fast)" # (UPGMA (Fast), Neighbor-joining (Slow))
+
+# Consensus Parameters
+BOOTSTRAP_TREE = True
+NUM_TREES = 100             
+NOISE_SCALE = 0.02          
+
+# Alignment Settings
+GAP_OPEN = -0.5
+GAP_EXTEND = 0.0           
+WORKERS = 1   
+SAFE_TEMP_DIR = r"C:\Alignment_TEMP"
+SHOW_REGRESSION_PLOT = False
+POOLING_METHOD = "max"    # ("mean", "max") - method to pool residue embeddings into sequence vectors
+LENGTH_RATIO_POWER = 2.0  # (float) - exponent to scale the sequence length ratio penalty
+
+# --- DIRECTORY DEFAULTS ---
+FASTA_DIR = os.path.join("..", "Input_Files", "Sequence_Sets")
+EMBED_DIR = os.path.join("..", "Embeddings")
+NETWORK_DIR = os.path.join("..", "Input_Files", "Networks_EValues")
+MSA_DIR = os.path.join("..", "Input_Files", "Multiple_Alignments")
+
+# --- JSON Settings Override ---
+import json
+import ast
+import os
+
+# Automatically calculate the root directory of the SSN project for the current PC
+# (Assuming utility scripts are located in the /utilities/ folder)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SETTINGS_FILE = os.path.join(PROJECT_ROOT, "Input_Files", "tools_settings.json")
+
+if os.path.exists(SETTINGS_FILE):
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            all_settings = json.load(f)
+            
+            # 1. Load GLOBAL directories and convert relative paths to absolute paths
+            if "DIRECTORIES" in all_settings:
+                for k, v in all_settings["DIRECTORIES"].items():
+                    if k in globals() and v is not None and str(v).strip() != "":
+                        # Expand relative paths dynamically based on the current PC
+                        if not os.path.isabs(str(v)):
+                            v = os.path.normpath(os.path.join(PROJECT_ROOT, str(v)))
+                        globals()[k] = v
+                        
+            # 2. Load script-specific settings
+            script_name = os.path.basename(__file__)
+            if script_name in all_settings:
+                user_settings = all_settings[script_name]
+                for k, v in user_settings.items():
+                    if k in globals() and v is not None and str(v).strip() != "":
+                        orig = globals()[k]
+                        
+                        # Type casting to match the original Python variable type
+                        if isinstance(orig, int) and not isinstance(orig, bool):
+                            try: v = int(v)
+                            except: pass
+                        elif isinstance(orig, float):
+                            try: v = float(v)
+                            except: pass
+                        elif isinstance(orig, list):
+                            try: v = ast.literal_eval(v) if isinstance(v, str) else v
+                            except: pass
+                        elif orig is None:
+                            if v == "None": v = None
+                            elif str(v).replace('.', '', 1).isdigit():
+                                v = float(v) if '.' in str(v) else int(v)
+                                
+                        # Convert any script-specific directory paths to absolute paths
+                        if isinstance(v, str) and k.endswith("_DIR") and not os.path.isabs(v):
+                            v = os.path.normpath(os.path.join(PROJECT_ROOT, v))
+                            
+                        globals()[k] = v
+    except Exception as e:
+        print(f"Failed to load user settings: {e}")
+
+# --- INFERRED PATHS ---
+# Built AFTER JSON loading so they use the overwritten variables
+import re
+
+FULL_INPUT_FASTA   = os.path.join(FASTA_DIR, INPUT_FASTA)
+FULL_INPUT_EMBED   = os.path.join(EMBED_DIR, INPUT_EMBED)
+FULL_INPUT_NETWORK = os.path.join(NETWORK_DIR, INPUT_NETWORK)
+
+# ---> Extract SEQUENCE_SET and MODEL_NAME <---
+# 1. Extract SEQUENCE_SET by stripping the '.fasta' extension
+_seq_set = INPUT_FASTA.replace(".fasta", "")
+
+# 2. Extract MODEL_NAME by finding the text between brackets in the embed filename
+_model_match = re.search(r"\[(.*?)\]", INPUT_EMBED)
+_model_name = _model_match.group(1) if _model_match else "unknown_model"
+
+# 3. Construct the exact requested output format dynamically using the MSA directory
+OUTPUT_FASTA = os.path.join(MSA_DIR, f"{_seq_set}_[{_model_name}]_alignment.fasta")
+
+DEVICE = Hardware_Utils.get_optimal_device()
+
+# ==========================================
+# CORE CLASSES
+# ==========================================
+class MSACluster:
+    def __init__(self, idx, sequences, ids, embedding=None):
+        self.idx = idx
+        self.sequences = sequences   
+        self.ids = ids               
+        self.embedding = embedding   # Only populated for intermediate/merged nodes
+        self.is_leaf = embedding is None
+
+    def get_embedding(self, h5_path, valid_headers):
+        """Lazy loads the embedding from disk if it's a leaf node."""
+        if self.embedding is not None:
+            return self.embedding
+        
+        # If leaf, open the file, fetch the single array, and close the file
+        with h5py.File(h5_path, "r") as f:
+            header = valid_headers[self.ids[0]]
+            safe_h = header.replace("/", "_").replace("\\", "_")
+            # Pull as float16 directly from the disk to minimize RAM overhead
+            return f["embeddings"][safe_h][:].astype(np.float16)  
+
+# ==========================================
+# HELPER: FASTA LOADER & WORKER
+# ==========================================
+def compute_single_tree_worker(seed, num_seqs, num_edges, edge_i_path, edge_j_path, edge_dist_path, max_dist, noise_scale, tree_method):
+    """Worker function optimized with Memory Mapping to bypass Windows IPC limits."""
+    np.random.seed(seed)
+    
+    # 1. Load the shared data dynamically from disk (Virtually 0 RAM overhead)
+    edge_i = np.memmap(edge_i_path, dtype=np.int32, mode='r', shape=(num_edges,))
+    edge_j = np.memmap(edge_j_path, dtype=np.int32, mode='r', shape=(num_edges,))
+    edge_dist = np.memmap(edge_dist_path, dtype=np.float32, mode='r', shape=(num_edges,))
+    
+    condensed_size = int(num_seqs * (num_seqs - 1) / 2)
+    # Allocate the matrix in float32 directly in the worker
+    D_perturbed_cond = np.full(condensed_size, max_dist, dtype=np.float32)
+    
+    # Generate noise ONLY for the active edges
+    noise = np.random.normal(1.0, noise_scale, size=num_edges)
+    perturbed_dists = (edge_dist * noise).astype(np.float32)
+    
+    populate_condensed_matrix(D_perturbed_cond, num_seqs, edge_i, edge_j, perturbed_dists)
+    
+    # Run Linkage or Neighbor-joining
+    if tree_method == "Neighbor-joining (Slow)":
+        Z = neighbor_joining_condensed(D_perturbed_cond, num_seqs)
+    else:
+        Z = sch.linkage(D_perturbed_cond, method='average')
+    
+    # Windows requires explicitly closing the memmap before it can be deleted later
+    del edge_i
+    del edge_j
+    del edge_dist
+    
+    return Z
+
+def load_fasta_map(filepath):
+    print(f"Loading sequences from {filepath}...")
+    seq_dict = {}
+    try:
+        with open(filepath, 'r') as f:
+            header = None
+            seq_accum = []
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                if line.startswith(">"):
+                    if header: seq_dict[header] = "".join(seq_accum)
+                    header = line[1:]
+                    seq_accum = []
+                else: seq_accum.append(line)
+            if header: seq_dict[header] = "".join(seq_accum)
+    except FileNotFoundError:
+        sys.exit(f"❌ Error: FASTA file not found at {filepath}")
+    return seq_dict
+
+# ==========================================
+# ALIGNMENT KERNELS
+# ==========================================
+def compute_score_matrix_torch(emb_i, emb_j):
+    t_i = torch.as_tensor(emb_i, device=DEVICE, dtype=torch.float32)
+    t_j = torch.as_tensor(emb_j, device=DEVICE, dtype=torch.float32)
+    dist_mat = torch.cdist(t_i, t_j, p=2)
+    sim_mat = torch.exp(-dist_mat)
+    
+    epsilon = 1e-8
+    row_mean = sim_mat.mean(dim=1, keepdim=True)
+    row_std = sim_mat.std(dim=1, keepdim=True)
+    col_mean = sim_mat.mean(dim=0, keepdim=True)
+    col_std = sim_mat.std(dim=0, keepdim=True)
+    
+    z_r = (sim_mat - row_mean) / (row_std + epsilon)
+    z_c = (sim_mat - col_mean) / (col_std + epsilon)
+    final_score = (z_r + z_c) / 2.0
+    
+    return final_score.to(dtype=torch.float32, device="cpu").numpy()
+
+@jit(nopython=True, fastmath=True)
+def populate_condensed_matrix(D_condensed, num_seqs, edge_i, edge_j, edge_dists):
+    """Blazing fast population of the 1D condensed array from sparse data."""
+    for k in range(len(edge_i)):
+        i = edge_i[k]
+        j = edge_j[k]
+        if i > j: 
+            temp = i
+            i = j
+            j = temp
+        idx = int(num_seqs*i - i*(i+1)/2 + j - i - 1)
+        D_condensed[idx] = edge_dists[k]
+
+@jit(nopython=True, fastmath=True)
+def compute_sparse_cophenetic(Z, num_seqs, edge_i, edge_j):
+    """Traces the linkage tree to find cophenetic distances ONLY for specific edges."""
+    num_edges = len(edge_i)
+    coph_dists = np.zeros(num_edges, dtype=np.float32)
+    
+    total_nodes = 2 * num_seqs - 1
+    parent = np.arange(total_nodes, dtype=np.int32)
+    height = np.zeros(total_nodes, dtype=np.float32)
+    
+    # Build tree hierarchy from Z matrix
+    for i in range(num_seqs - 1):
+        idx = num_seqs + i
+        child1 = int(Z[i, 0])
+        child2 = int(Z[i, 1])
+        parent[child1] = idx
+        parent[child2] = idx
+        height[idx] = Z[i, 2]
+        
+    visited_marker = np.zeros(total_nodes, dtype=np.int32)
+    
+    # Trace Lowest Common Ancestor (LCA) for each edge
+    for k in range(num_edges):
+        u = edge_i[k]
+        v = edge_j[k]
+        marker = k + 1
+        
+        curr = u
+        visited_marker[curr] = marker
+        while parent[curr] != curr:
+            curr = parent[curr]
+            visited_marker[curr] = marker
+            
+        curr = v
+        while visited_marker[curr] != marker:
+            curr = parent[curr]
+            
+        coph_dists[k] = height[curr]
+        
+    return coph_dists
+
+@jit(nopython=True, fastmath=True)
+def neighbor_joining_kernel(D, N):
+    Z = np.zeros((N - 1, 4), dtype=np.float64)
+    
+    # Track active node indices contiguous in memory (sorted)
+    active_list = np.arange(N, dtype=np.int32)
+    k = N
+    
+    # Pre-calculate initial row sums for the first N nodes
+    R = np.zeros(2 * N - 1, dtype=np.float64)
+    for i in range(N):
+        s = 0.0
+        for j in range(N):
+            s += D[i, j]
+        R[i] = s
+        
+    node_height = np.zeros(2 * N - 1, dtype=np.float64)
+    num_leaves = np.ones(2 * N - 1, dtype=np.float64)
+    
+    # Pre-allocate r_list array for reuse
+    r_list = np.zeros(2 * N - 1, dtype=np.float64)
+    
+    for step in range(N - 1):
+        if k > 2:
+            inv_k_minus_2 = 1.0 / (k - 2)
+            min_Q = 1e15
+            idx_u = -1
+            idx_v = -1
+            
+            # Precompute normalized divergence values for active nodes
+            for i in range(k):
+                r_list[i] = R[active_list[i]] * inv_k_minus_2
+                
+            for i in range(k):
+                u = active_list[i]
+                r_u = r_list[i]
+                for j in range(i + 1, k):
+                    v = active_list[j]
+                    q = D[u, v] - (r_u + r_list[j])
+                    if q < min_Q:
+                        min_Q = q
+                        idx_u = i
+                        idx_v = j
+        else:
+            idx_u = 0
+            idx_v = 1
+            
+        u = active_list[idx_u]
+        v = active_list[idx_v]
+        
+        # New parent node
+        w = N + step
+        
+        dist_uv = D[u, v]
+        child_max = max(node_height[u], node_height[v])
+        node_height[w] = max(dist_uv, child_max)
+        
+        # Update distances from w to other active nodes and calculate R[w]
+        sum_d_wm = 0.0
+        for p in range(k):
+            if p != idx_u and p != idx_v:
+                m = active_list[p]
+                d_wm = 0.5 * (D[u, m] + D[v, m] - dist_uv)
+                D[w, m] = d_wm
+                D[m, w] = d_wm
+                sum_d_wm += d_wm
+                # Update R[m]
+                R[m] = R[m] - D[u, m] - D[v, m] + d_wm
+                
+        R[w] = sum_d_wm
+        
+        # Record merge in Z
+        c1 = min(u, v)
+        c2 = max(u, v)
+        Z[step, 0] = float(c1)
+        Z[step, 1] = float(c2)
+        Z[step, 2] = node_height[w]
+        Z[step, 3] = num_leaves[u] + num_leaves[v]
+        
+        num_leaves[w] = num_leaves[u] + num_leaves[v]
+        
+        # Update active list keeping it sorted:
+        write_idx = 0
+        for p in range(k):
+            if p != idx_u and p != idx_v:
+                active_list[write_idx] = active_list[p]
+                write_idx += 1
+        active_list[write_idx] = w
+        k -= 1
+        
+    return Z
+
+def neighbor_joining_condensed(D_condensed, num_seqs):
+    D_square = squareform(D_condensed)
+    D_allocated = np.zeros((2 * num_seqs - 1, 2 * num_seqs - 1), dtype=np.float64)
+    D_allocated[:num_seqs, :num_seqs] = D_square
+    return neighbor_joining_kernel(D_allocated, num_seqs)
+
+@jit(nopython=True, fastmath=True)
+def calculate_normalized_scores_kernel(edge_i, edge_j, raw_scores, align_lens, seq_lens, is_evalue, mode_int):
+    """C-speed kernel for processing hundreds of millions of edge normalizations."""
+    num_edges = len(edge_i)
+    norm_scores = np.zeros(num_edges, dtype=np.float32)
+    max_norm_score = 0.0
+    
+    for k in range(num_edges):
+        if is_evalue:
+            norm_score = raw_scores[k]
+        else:
+            if mode_int == 0:  # alignment_length
+                denom = max(align_lens[k], 1.0)
+            else:
+                len_src = seq_lens[edge_i[k]]
+                len_dst = seq_lens[edge_j[k]]
+                
+                if mode_int == 1:  # shorter_sequence
+                    denom = min(len_src, len_dst)
+                elif mode_int == 2:  # longer_sequence
+                    denom = max(len_src, len_dst)
+                elif mode_int == 3:  # average_sequence
+                    denom = (len_src + len_dst) / 2.0
+                else:
+                    denom = 1.0 
+                    
+            denom = max(denom, 1e-6)
+            norm_score = raw_scores[k] / denom
+            
+        norm_scores[k] = norm_score
+        if norm_score > max_norm_score:
+            max_norm_score = norm_score
+            
+    return norm_scores, max_norm_score
+
+@jit(nopython=True, fastmath=True)
+def run_global_traceback(score_matrix, gap_open, gap_extend):
+    N, M = score_matrix.shape
+    NEG_INF = -1e9
+    
+    # 3-State Affine DP Matrices (Match, Delete, Insert)
+    dp_M = np.full((N + 1, M + 1), NEG_INF, dtype=np.float32)
+    dp_D = np.full((N + 1, M + 1), NEG_INF, dtype=np.float32)
+    dp_I = np.full((N + 1, M + 1), NEG_INF, dtype=np.float32)
+    
+    # Pointers to track which matrix the current cell came from
+    ptr_M = np.zeros((N + 1, M + 1), dtype=np.int8)
+    ptr_D = np.zeros((N + 1, M + 1), dtype=np.int8)
+    ptr_I = np.zeros((N + 1, M + 1), dtype=np.int8)
+    
+    dp_M[0, 0] = 0.0
+    
+    # Initialize edges
+    dp_D[1, 0] = gap_open
+    ptr_D[1, 0] = 1 # 1 = came from M(0,0)
+    for i in range(2, N + 1):
+        dp_D[i, 0] = dp_D[i-1, 0] + gap_extend
+        ptr_D[i, 0] = 2 # 2 = came from D
+        
+    dp_I[0, 1] = gap_open
+    ptr_I[0, 1] = 1 # 1 = came from M(0,0)
+    for j in range(2, M + 1):
+        dp_I[0, j] = dp_I[0, j-1] + gap_extend
+        ptr_I[0, j] = 3 # 3 = came from I
+
+    for i in range(1, N + 1):
+        for j in range(1, M + 1):
+            # 1. Update dp_D (Delete / Gap in sequence 2 / move down)
+            d_from_m = dp_M[i-1, j] + gap_open
+            d_from_d = dp_D[i-1, j] + gap_extend
+            if d_from_m >= d_from_d:
+                dp_D[i, j] = d_from_m
+                ptr_D[i, j] = 1 
+            else:
+                dp_D[i, j] = d_from_d
+                ptr_D[i, j] = 2 
+                
+            # 2. Update dp_I (Insert / Gap in sequence 1 / move right)
+            i_from_m = dp_M[i, j-1] + gap_open
+            i_from_i = dp_I[i, j-1] + gap_extend
+            if i_from_m >= i_from_i:
+                dp_I[i, j] = i_from_m
+                ptr_I[i, j] = 1 
+            else:
+                dp_I[i, j] = i_from_i
+                ptr_I[i, j] = 3 
+                
+            # 3. Update dp_M (Match/Mismatch / diagonal)
+            score = score_matrix[i-1, j-1]
+            m_from_m = dp_M[i-1, j-1] + score
+            m_from_d = dp_D[i-1, j-1] + score
+            m_from_i = dp_I[i-1, j-1] + score
+            
+            best_m = m_from_m
+            best_ptr = 1
+            if m_from_d > best_m:
+                best_m = m_from_d
+                best_ptr = 2
+            if m_from_i > best_m:
+                best_m = m_from_i
+                best_ptr = 3
+                
+            dp_M[i, j] = best_m
+            ptr_M[i, j] = best_ptr
+
+    # Traceback
+    path_buffer = np.zeros(N + M, dtype=np.int8)
+    k = 0
+    i, j = N, M
+    
+    # Find the optimal final state to trace backward from
+    best_final = dp_M[N, M]
+    state = 1
+    if dp_D[N, M] > best_final:
+        best_final = dp_D[N, M]
+        state = 2
+    if dp_I[N, M] > best_final:
+        best_final = dp_I[N, M]
+        state = 3
+        
+    while i > 0 or j > 0:
+        if state == 1:
+            path_buffer[k] = 1
+            k += 1
+            next_state = ptr_M[i, j]
+            i -= 1
+            j -= 1
+            state = next_state
+        elif state == 2:
+            path_buffer[k] = 2
+            k += 1
+            next_state = ptr_D[i, j]
+            i -= 1
+            state = next_state
+        elif state == 3:
+            path_buffer[k] = 3
+            k += 1
+            next_state = ptr_I[i, j]
+            j -= 1
+            state = next_state
+        else:
+            break
+            
+    return path_buffer[:k]
+
+def merge_clusters(cluster_a, cluster_b, path, emb_a, emb_b):
+    path = path[::-1]
+    new_seqs_a = ["" for _ in cluster_a.sequences]
+    new_seqs_b = ["" for _ in cluster_b.sequences]
+    merged_vecs = []
+    
+    idx_a, idx_b = 0, 0
+    
+    w_a = float(len(cluster_a.ids))
+    w_b = float(len(cluster_b.ids))
+    total_w = w_a + w_b
+
+    for move in path:
+        if move == 1: 
+            for i, s in enumerate(cluster_a.sequences): new_seqs_a[i] += s[idx_a]
+            for i, s in enumerate(cluster_b.sequences): new_seqs_b[i] += s[idx_b]
+            # Upcast to float32 for safe math against large weights
+            vec = (emb_a[idx_a].astype(np.float32) * w_a + emb_b[idx_b].astype(np.float32) * w_b) / total_w
+            merged_vecs.append(vec)
+            idx_a += 1; idx_b += 1
+            
+        elif move == 2: 
+            for i, s in enumerate(cluster_a.sequences): new_seqs_a[i] += s[idx_a]
+            for i, s in enumerate(cluster_b.sequences): new_seqs_b[i] += "-"
+            vec = (emb_a[idx_a].astype(np.float32) * w_a) / total_w
+            merged_vecs.append(vec)
+            idx_a += 1
+            
+        elif move == 3: 
+            for i, s in enumerate(cluster_a.sequences): new_seqs_a[i] += "-"
+            for i, s in enumerate(cluster_b.sequences): new_seqs_b[i] += s[idx_b]
+            vec = (emb_b[idx_b].astype(np.float32) * w_b) / total_w
+            merged_vecs.append(vec)
+            idx_b += 1
+
+    new_cluster = MSACluster(
+        idx=-1,
+        sequences=new_seqs_a + new_seqs_b,
+        # Downcast back to float16 to save RAM for the remaining iterations
+        embedding=np.stack(merged_vecs, axis=0).astype(np.float16),
+        ids=cluster_a.ids + cluster_b.ids
+    )
+    new_cluster.is_leaf = False
+    return new_cluster
+
+# ==========================================
+# MAIN EXECUTION
+# ==========================================
+def run_msa_builder():
+    os.makedirs(os.path.dirname(OUTPUT_FASTA), exist_ok=True)
+
+    # 1. LOAD RAW HEADERS
+    print("--- Loading Headers ---")
+    
+    # A. Network Headers & Arrays
+    print(f"Opening HDF5 data...")
+    try:
+        f_emb = h5py.File(FULL_INPUT_EMBED, "r")
+        f_net = h5py.File(FULL_INPUT_NETWORK, "r")
+    except Exception as e:
+        sys.exit(f"❌ Error opening HDF5 arrays: {e}")
+    
+    raw_net_headers = f_net['headers'][:]
+    net_headers = [h.decode('utf-8') if isinstance(h, bytes) else h for h in raw_net_headers]
+    
+    arr_i = f_net['i'][:]
+    arr_j = f_net['j'][:]
+    
+    if 'score' in f_net:
+        target_score = f_net['score'][:]
+        target_len   = np.ones_like(target_score)
+        is_evalue = True
+    else:
+        if ALIGNMENT_SCORE == "global":
+            target_score = f_net['g_score'][:]
+            target_len   = f_net['g_len'][:]
+        else:
+            target_score = f_net['l_score'][:]
+            target_len   = f_net['l_len'][:]
+        is_evalue = False
+
+    # Validate dataset lengths match to prevent out-of-bounds IndexError
+    if not (len(arr_i) == len(arr_j) == len(target_score) == len(target_len)):
+        sys.exit(f"❌ Error: Network file {FULL_INPUT_NETWORK} is corrupted or incomplete.\n"
+                 f"Dataset lengths: i={len(arr_i)}, j={len(arr_j)}, score={len(target_score)}, len={len(target_len)}.\n"
+                 f"Please delete this network file and re-run the pipeline to re-generate it.")
+    
+    # B. Embedding Headers (Metadata Only)
+    raw_emb_headers = f_emb['headers'][:]
+    emb_headers = [h.decode('utf-8') if isinstance(h, bytes) else h for h in raw_emb_headers]
+    
+    # C. FASTA Headers
+    # 3. VERIFY FASTA COVERAGE
+    seq_dict = load_fasta_map(FULL_INPUT_FASTA)
+    fasta_headers = list(seq_dict.keys())
+    
+    # 2. CALCULATE INTERSECTION
+    set_net = set(net_headers)
+    set_emb = set(emb_headers)
+    set_fas = set(fasta_headers)
+    
+    common_set = set_net.intersection(set_emb).intersection(set_fas)
+    
+    if not common_set:
+        sys.exit("❌ Error: No common sequences found between Network, Embeddings, and FASTA!")
+        
+    print(f"Intersection Found: {len(common_set)} sequences.")
+    print(f"  (Network: {len(set_net)}, Embed: {len(set_emb)}, FASTA: {len(set_fas)})")
+
+    # 3. BUILD VALIDATION LIST (Preserve Network Order)
+    valid_headers = []
+    for h in net_headers:
+        if h in common_set:
+            valid_headers.append(h)
+    
+    num_seqs = len(valid_headers)
+    header_to_new_idx = {h: i for i, h in enumerate(valid_headers)}
+    
+    # 4. Has been removed
+
+    # 5. BUILD MAPPINGS & FILTER NETWORK EDGES
+    print("--- Filtering Network Edges ---")
+    
+    # Map: Network_Index -> New_Index
+    net_old_to_new = {}
+    for i, h in enumerate(net_headers):
+        if h in header_to_new_idx:
+            net_old_to_new[i] = header_to_new_idx[h]
+
+    processed_edges = []
+
+    for k in range(len(arr_i)):
+        u_old, v_old = int(arr_i[k]), int(arr_j[k])
+        
+        if u_old in net_old_to_new and v_old in net_old_to_new:
+            u_new = net_old_to_new[u_old]
+            v_new = net_old_to_new[v_old]
+            processed_edges.append((u_new, v_new, target_score[k], target_len[k]))
+
+    print(f"Retained {len(processed_edges)} edges valid for the intersection.")
+
+    import scipy.sparse as sp
+
+    # 7. PREPARE SPARSE DATA ARRAYS
+    print(f"Preparing sparse distance metrics...")
+    
+    num_edges = len(processed_edges)
+    
+    # Pre-allocate exactly sized arrays for Numba
+    edge_i = np.zeros(num_edges, dtype=np.int32)
+    edge_j = np.zeros(num_edges, dtype=np.int32)
+    raw_scores = np.zeros(num_edges, dtype=np.float32)
+    align_lens = np.zeros(num_edges, dtype=np.float32)
+    
+    # 7a. Fast Data Unpacking (Moving memory, no math)
+    print("Unpacking edges into memory arrays...")
+    for k, e in enumerate(tqdm(processed_edges, desc="Unpacking Edges")):
+        edge_i[k] = e[0]
+        edge_j[k] = e[1]
+        raw_scores[k] = e[2]
+        align_lens[k] = e[3]
+        
+    # 7b. Pre-compute Sequence Lengths into a C-compatible array
+    num_seqs = len(valid_headers)
+    seq_lens_array = np.zeros(num_seqs, dtype=np.int32)
+    for idx, h in enumerate(valid_headers):
+        seq_lens_array[idx] = len(seq_dict[h])
+
+    # 7c. Map the string mode to an integer for the Numba kernel
+    mode_map = {
+        "alignment_length": 0,
+        "shorter_sequence": 1,
+        "longer_sequence": 2,
+        "average_sequence": 3
+    }
+    
+    if NORMALIZATION_MODE not in mode_map and not is_evalue:
+        raise ValueError(f"❌ Critical Error: Unhandled NORMALIZATION_MODE '{NORMALIZATION_MODE}'. Cannot calculate distance.")
+    
+    mode_int = mode_map.get(NORMALIZATION_MODE, 0)
+
+    # 7d. Execute C-Speed Kernel
+    print("Executing Numba Math Kernel...")
+    norm_scores, max_norm_score = calculate_normalized_scores_kernel(
+        edge_i=edge_i, 
+        edge_j=edge_j, 
+        raw_scores=raw_scores, 
+        align_lens=align_lens, 
+        seq_lens=seq_lens_array, 
+        is_evalue=is_evalue, 
+        mode_int=mode_int
+    )
+
+    MAX_DISTANCE = max_norm_score + 0.1 
+
+    # Invert scores to distances
+    edge_dists = np.maximum(0.0, max_norm_score - norm_scores).astype(np.float32)
+
+    is_sparse = num_edges < int(num_seqs * (num_seqs - 1) / 2)
+    iso_reg = None
+    cos_sim_mat = None
+
+    if is_sparse:
+        print(f"Network is sparse ({num_edges} / {int(num_seqs * (num_seqs - 1) / 2)} edges). Activating hybrid cosine-alignment transformation...")
+        
+        # Load embeddings for valid_headers and calculate their pooled vectors
+        print(f"Computing pooled embeddings ({POOLING_METHOD} pooling) for all sequences...")
+        mean_embs = []
+        for h in tqdm(valid_headers, desc="Computing Pooled Embeddings"):
+            safe_h = h.replace("/", "_").replace("\\", "_")
+            emb = f_emb["embeddings"][safe_h][:] # shape: (length, dim)
+            if POOLING_METHOD == "max":
+                pooled = np.max(emb, axis=0)
+            else:
+                pooled = np.mean(emb, axis=0)
+            mean_embs.append(pooled)
+        mean_embs = np.array(mean_embs, dtype=np.float32)
+        
+        print("Calculating all-vs-all length-adjusted similarities (length ratio * cosine similarity)...")
+        norms = np.linalg.norm(mean_embs, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-8)
+        norm_embs = mean_embs / norms
+        cos_sim_mat = np.dot(norm_embs, norm_embs.T)
+        cos_sim_mat = np.clip(cos_sim_mat, -1.0, 1.0)
+        
+        # Apply sequence length ratio adjustment
+        lens_col = seq_lens_array[:, np.newaxis]
+        lens_row = seq_lens_array[np.newaxis, :]
+        min_lens = np.minimum(lens_col, lens_row)
+        max_lens = np.maximum(lens_col, lens_row)
+        max_lens = np.maximum(max_lens, 1)
+        length_ratio_mat = min_lens / max_lens
+        
+        if LENGTH_RATIO_POWER != 1.0:
+            length_ratio_mat = length_ratio_mat ** LENGTH_RATIO_POWER
+            
+        cos_sim_mat = cos_sim_mat * length_ratio_mat
+        
+        # Extract overlapping pairs
+        X_cos = cos_sim_mat[edge_i, edge_j]
+        Y_align = norm_scores
+        
+        print("Fitting Isotonic Regression (Adjusted Similarity -> Alignment Score)...")
+        # If we have a large number of edges, sample 100,000 edges to maintain sub-second speed
+        if len(X_cos) > 100000:
+            np.random.seed(42)
+            sample_idx = np.random.choice(len(X_cos), size=100000, replace=False)
+            X_fit = X_cos[sample_idx]
+            Y_fit = Y_align[sample_idx]
+        else:
+            X_fit = X_cos
+            Y_fit = Y_align
+            
+        iso_reg = IsotonicRegression(out_of_bounds='clip')
+        iso_reg.fit(X_fit, Y_fit)
+        
+        # Evaluate fitness on all edges
+        Y_pred = iso_reg.predict(X_cos)
+        rho, _ = spearmanr(X_cos, Y_align)
+        r2 = r2_score(Y_align, Y_pred)
+        
+        print(f"Isotonic Regression Fit Diagnostics:")
+        print(f"  > Spearman Rank Correlation (rho): {rho:.4f}")
+        print(f"  > Coefficient of Determination (R^2): {r2:.4f}")
+
+        # ==========================================
+        # TEMPORARY PLOTTING SECTION (EASY TO REMOVE)
+        # ==========================================
+        if SHOW_REGRESSION_PLOT:
+            try:
+                import matplotlib.pyplot as plt
+                print("Displaying Isotonic Regression plot. Close the plot window to continue...")
+                plt.figure(figsize=(10, 6))
+                
+                plot_sample_size = min(len(X_cos), 5000)
+                np.random.seed(42)
+                plot_idx = np.random.choice(len(X_cos), size=plot_sample_size, replace=False)
+                
+                plt.scatter(X_cos[plot_idx], Y_align[plot_idx], color='blue', alpha=0.3, label='Edges (Sample)', s=5)
+                
+                x_line = np.linspace(np.min(X_cos), np.max(X_cos), 1000)
+                y_line = iso_reg.predict(x_line)
+                plt.plot(x_line, y_line, color='red', linewidth=3, label='Isotonic Fit')
+                
+                plt.title(f"Isotonic Regression Fit (Spearman rho = {rho:.4f}, R^2 = {r2:.4f})")
+                plt.xlabel("Length-Adjusted Embedding Cosine Similarity")
+                plt.ylabel("Normalized Network Score")
+                plt.legend()
+                plt.grid(True, linestyle='--', alpha=0.5)
+                plt.tight_layout()
+                plt.show()
+            except Exception as plot_err:
+                print(f"Could not open plot window: {plot_err}")
+        # ==========================================
+        # END OF TEMPORARY PLOTTING SECTION
+        # ==========================================
+
+    # 8. BUILD CONSENSUS TREE
+    condensed_size = int(num_seqs * (num_seqs - 1) / 2)
+    
+    if is_sparse and iso_reg is not None and cos_sim_mat is not None:
+        print("Applying hybrid adjusted similarity-alignment imputation for final master tree...")
+        dense_scores = iso_reg.predict(cos_sim_mat.ravel()).reshape(num_seqs, num_seqs)
+        dense_dists = np.maximum(0.0, max_norm_score - dense_scores).astype(np.float32)
+        np.fill_diagonal(dense_dists, 0.0)
+        dense_dists = 0.5 * (dense_dists + dense_dists.T)
+        D_final_cond = squareform(dense_dists)
+    else:
+        D_final_cond = np.full(condensed_size, MAX_DISTANCE, dtype=np.float32)
+
+    if BOOTSTRAP_TREE:
+        print(f"\nBuilding Consensus Tree from {NUM_TREES} bootstrap replicates using {WORKERS} cores...")
+        
+        # --- MEMORY MAPPING FIX FOR WINDOWS IPC LIMITS ---
+        print("Writing sparse data to temporary Memory-Mapped files for workers...")
+        
+        # 1. Define a strictly named, predictable folder in the user-defined Temp directory
+        temp_dir = os.path.join(SAFE_TEMP_DIR, f"{_seq_set}_[{_model_name}]_Memmap_Cache")
+        
+        # 2. Auto-Cleanup Failsafe: Wipe the folder if it was left behind by a previous crash
+        if os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+                print("Cleared residual cache from a previous interrupted run.")
+            except Exception as e:
+                print(f"Warning: Could not clear old temp directory. It might be locked by another process: {e}")
+                
+        os.makedirs(temp_dir, exist_ok=True)
+        print(f"Temporary memmap cache active at: {temp_dir}")
+        
+        edge_i_path = os.path.join(temp_dir, 'edge_i.dat')
+        edge_j_path = os.path.join(temp_dir, 'edge_j.dat')
+        edge_dist_path = os.path.join(temp_dir, 'edge_dist.dat')
+        
+        # Dump RAM arrays to disk
+        mm_i = np.memmap(edge_i_path, dtype=np.int32, mode='w+', shape=edge_i.shape)
+        mm_i[:] = edge_i[:]
+        mm_i.flush()
+        
+        mm_j = np.memmap(edge_j_path, dtype=np.int32, mode='w+', shape=edge_j.shape)
+        mm_j[:] = edge_j[:]
+        mm_j.flush()
+        
+        mm_d = np.memmap(edge_dist_path, dtype=np.float32, mode='w+', shape=edge_dists.shape)
+        mm_d[:] = edge_dists[:]
+        mm_d.flush()
+        
+        # Clear the massive original arrays from the main process RAM
+        del edge_i
+        del edge_j
+        del edge_dists
+        
+        # Open read-only views for the main process loop
+        mm_i_main = np.memmap(edge_i_path, dtype=np.int32, mode='r', shape=(num_edges,))
+        mm_j_main = np.memmap(edge_j_path, dtype=np.int32, mode='r', shape=(num_edges,))
+        
+        C_accum_sparse = np.zeros(num_edges, dtype=np.float32)
+        seeds = np.random.randint(0, int(1e9), size=NUM_TREES)
+        
+        worker_func = partial(compute_single_tree_worker, 
+                              num_seqs=num_seqs, 
+                              num_edges=num_edges,
+                              edge_i_path=edge_i_path, 
+                              edge_j_path=edge_j_path, 
+                              edge_dist_path=edge_dist_path, 
+                              max_dist=MAX_DISTANCE, 
+                              noise_scale=NOISE_SCALE,
+                              tree_method=TREE_METHOD)
+        
+        with mp.Pool(processes=WORKERS) as pool:
+            iterator = pool.imap_unordered(worker_func, seeds)
+            for Z in tqdm(iterator, total=NUM_TREES, desc="Bootstrapping Trees"):
+                sparse_coph = compute_sparse_cophenetic(Z, num_seqs, mm_i_main, mm_j_main)
+                C_accum_sparse += sparse_coph
+                
+        C_avg_sparse = C_accum_sparse / NUM_TREES
+        
+        print("Building final master tree...")
+        populate_condensed_matrix(D_final_cond, num_seqs, mm_i_main, mm_j_main, C_avg_sparse)
+        
+        # --- CLEANUP ---
+        del mm_i_main
+        del mm_j_main
+        del mm_i
+        del mm_j
+        del mm_d
+        
+        gc.collect() # Force Windows to release file handles
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"Note: Could not clean up temporary directory {temp_dir}: {e}")
+    else:
+        print("\nBuilding Deterministic Tree (Bootstrapping bypassed)...")
+        populate_condensed_matrix(D_final_cond, num_seqs, edge_i, edge_j, edge_dists)
+        
+        # Clear original arrays
+        del edge_i
+        del edge_j
+        del edge_dists
+        gc.collect()
+
+    if TREE_METHOD == "Neighbor-joining (Slow)":
+        linkage_matrix = neighbor_joining_condensed(D_final_cond, num_seqs)
+    else:
+        linkage_matrix = sch.linkage(D_final_cond, method='average')
+    
+    # --- CLEANUP ---
+    del D_final_cond 
+    gc.collect()
+
+    # 9. INITIALIZE CLUSTERS (No embeddings loaded here!)
+    print("Initializing clusters...")
+    clusters = {}
+    for i in range(num_seqs):
+        header = valid_headers[i]
+        seq = seq_dict[header]
+        
+        # Initialize leaves purely with string/ID metadata
+        c = MSACluster(idx=i, sequences=[seq], ids=[i], embedding=None)
+        clusters[i] = c
+
+    # 10. PROGRESSIVE ALIGNMENT
+    print(f"Aligning {num_seqs} sequences...")
+    for iteration, link in enumerate(tqdm(linkage_matrix, desc="Merging Clusters")):
+        idx_a = int(link[0])
+        idx_b = int(link[1])
+        
+        cluster_a = clusters.pop(idx_a)
+        cluster_b = clusters.pop(idx_b)
+        
+        # --- LAZY LOAD: Fetch embeddings from disk (or RAM if already merged) ---
+        emb_a = cluster_a.get_embedding(FULL_INPUT_EMBED, valid_headers)
+        emb_b = cluster_b.get_embedding(FULL_INPUT_EMBED, valid_headers)
+
+        # Handle sequence padding for raw leaf nodes just before alignment
+        if cluster_a.is_leaf and len(cluster_a.sequences[0]) != emb_a.shape[0]:
+            seq = cluster_a.sequences[0]
+            if len(seq) > emb_a.shape[0]: cluster_a.sequences[0] = seq[:emb_a.shape[0]]
+            else: cluster_a.sequences[0] = seq.ljust(emb_a.shape[0], "-")
+            
+        if cluster_b.is_leaf and len(cluster_b.sequences[0]) != emb_b.shape[0]:
+            seq = cluster_b.sequences[0]
+            if len(seq) > emb_b.shape[0]: cluster_b.sequences[0] = seq[:emb_b.shape[0]]
+            else: cluster_b.sequences[0] = seq.ljust(emb_b.shape[0], "-")
+
+        # --- ALIGNMENT ---
+        score_mat = compute_score_matrix_torch(emb_a, emb_b)
+        path = run_global_traceback(score_mat, GAP_OPEN, GAP_EXTEND)
+
+        # You will need to pass emb_a and emb_b into your merge_clusters function now, 
+        # since they are no longer stored inside the cluster objects by default.
+        new_cluster = merge_clusters(cluster_a, cluster_b, path, emb_a, emb_b)
+        new_idx = num_seqs + iteration
+        new_cluster.idx = new_idx
+        clusters[new_idx] = new_cluster
+        
+        # --- GARBAGE COLLECTION: Drop old arrays immediately ---
+        del emb_a
+        del emb_b
+        del cluster_a
+        del cluster_b
+
+    # 11. SAVE
+    final_cluster = clusters[num_seqs + len(linkage_matrix) - 1]
+    print(f"Saving Consensus MSA to {OUTPUT_FASTA}...")
+    with open(OUTPUT_FASTA, "w") as f:
+        for i, seq_str in enumerate(final_cluster.sequences):
+            original_idx = final_cluster.ids[i]
+            header = valid_headers[original_idx]
+            f.write(f">{header}\n{seq_str}\n")
+    print("Done!")
+
+if __name__ == "__main__":
+    run_msa_builder()
