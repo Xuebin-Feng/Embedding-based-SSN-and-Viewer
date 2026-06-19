@@ -1266,16 +1266,21 @@ class ToolsGUI(QMainWindow):
                     # Connect switch to enable/disable the strength widget
                     def update_strength_state(checked, sl_ref=sl, w_ref=strength_widget):
                         w_ref.setEnabled(checked)
-                        if checked and sl_ref.value() == 0:
-                            sl_ref.setValue(20)
+                        if checked:
+                            if sl_ref.value() == 0:
+                                sl_ref.setValue(20)
+                        else:
+                            sl_ref.setValue(0)
                     
                     switch_btn.toggled.connect(update_strength_state)
                     update_strength_state(switch_btn.isChecked())
                     
-                    # Connect slider changes to automatically toggle switch off if value is 0
+                    # Connect slider changes to automatically toggle switch based on value
                     def on_strength_changed(val, btn_ref=switch_btn):
                         if val == 0:
                             btn_ref.setChecked(False)
+                        else:
+                            btn_ref.setChecked(True)
                     sl.valueChanged.connect(on_strength_changed)
                     
                     # Register strength in inputs

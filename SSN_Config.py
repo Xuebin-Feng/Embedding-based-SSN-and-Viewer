@@ -53,6 +53,7 @@ NEIGHBOR_COLOR = '#4488ff'
 HOVER_COLOR = '#ffaa00'
 CONNECTED_NODE_COLOR = '#ff0000'
 EDGE_COLOR = '#000000'
+LOW_RESOURCE_MODE = False
 NODE_BOUNDARY_COLOR = '#000000'
 
 # --- Grid Packing Settings ---
@@ -1154,7 +1155,7 @@ if __name__ == "__main__":
             self.visual_defaults = {
                 "NODE_SIZE": 10, "EDGE_WIDTH": 1.0, "NODE_BOUNDARY_WIDTH": 0.5, "EDGE_ALPHA": 0.1, "TEXT_SIZE": 8,
                 "TEXT_COLOR": "grey", "NEIGHBOR_COLOR": "#4488ff", "HOVER_COLOR": "#ffaa00", "CONNECTED_NODE_COLOR": "#ff0000",
-                "EDGE_COLOR": "#000000", "NODE_BOUNDARY_COLOR": "#000000"
+                "EDGE_COLOR": "#000000", "NODE_BOUNDARY_COLOR": "#000000", "LOW_RESOURCE_MODE": False
             }
             
             for key in color_keys:
@@ -1197,6 +1198,29 @@ if __name__ == "__main__":
                 self.labels[key] = lbl
                 self.inputs[key] = le
                 self.color_swatches[key] = swatch
+            # --- Low Resource Mode Toggle ---
+            lbl_low_res = QLabel("Low Resource Mode:")
+            lbl_low_res.setFixedWidth(180)
+            cb_low_res = QPushButton()
+            cb_low_res.setCheckable(True)
+            cb_low_res.setFixedSize(60, 28)
+            
+            def switch_toggle_style_low_res(checked, btn=cb_low_res):
+                if checked:
+                    btn.setText("ON")
+                    btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 14px; font-weight: bold; border: 1px solid #388E3C; }")
+                else:
+                    btn.setText("OFF")
+                    btn.setStyleSheet("QPushButton { background-color: #e0e0e0; color: #333; border-radius: 14px; font-weight: bold; border: 1px solid #bdbdbd; }")
+            
+            cb_low_res.toggled.connect(switch_toggle_style_low_res)
+            initial_low_res = bool(globals().get("LOW_RESOURCE_MODE", False))
+            cb_low_res.setChecked(initial_low_res)
+            switch_toggle_style_low_res(initial_low_res)
+            
+            form_layout.addRow(lbl_low_res, cb_low_res)
+            self.labels["LOW_RESOURCE_MODE"] = lbl_low_res
+            self.inputs["LOW_RESOURCE_MODE"] = cb_low_res
             
             main_layout.addLayout(form_layout)
             main_layout.addStretch()
@@ -1211,6 +1235,8 @@ if __name__ == "__main__":
                     if widget:
                         if hasattr(widget, 'setValue'):
                             widget.setValue(v)
+                        elif hasattr(widget, 'setChecked'):
+                            widget.setChecked(v)
                         else:
                             widget.setText(str(v))
                             if k in self.color_swatches:

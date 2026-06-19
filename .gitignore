@@ -1,11 +1,11 @@
 # User-specified files
-AGENT.md
+Documentations/AGENT.md
 Results/
 Input_Files/
 Embeddings/
 Cache_Files/
 manual_tools/
-3D_Viewer/
+VR_Viewer/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

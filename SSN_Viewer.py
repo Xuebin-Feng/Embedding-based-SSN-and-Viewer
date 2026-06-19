@@ -75,6 +75,7 @@ class MainViewer:
         self.selected_indices = []
         self.is_box_selecting = False
         self.is_multi_dragging = False
+        self._drag_edges_hidden = False
         self.drag_start_mouse = None
         self.drag_start_nodes_pos = None
         self.position_history = []  # Tracks states for Undo
@@ -744,6 +745,14 @@ class MainViewer:
                 
             active_edges = self._cached_active_edges
             
+            # --- Low Resource Mode: Hide edges of dragged nodes ---
+            if getattr(cfg, 'LOW_RESOURCE_MODE', False) and getattr(self, 'is_multi_dragging', False):
+                if getattr(self, 'selected_indices', None) and len(self.selected_indices) > 0:
+                    selected_set_arr = np.array(self.selected_indices)
+                    mask_u_moved = np.isin(active_edges[:, 0], selected_set_arr)
+                    mask_v_moved = np.isin(active_edges[:, 1], selected_set_arr)
+                    active_edges = active_edges[~(mask_u_moved | mask_v_moved)]
+            
             # ---> NEW: In UMAP mode, only show edges connected to selected nodes <---
             if getattr(cfg, 'UMAP_MODE', False):
                 if getattr(self, 'selected_indices', None) and len(self.selected_indices) > 0:
@@ -1062,6 +1071,7 @@ class MainViewer:
                 if nearest_idx in self.selected_indices:
                     if not getattr(cfg, 'UMAP_MODE', False):
                         self.is_multi_dragging = True
+                        self._drag_edges_hidden = False
                         self.drag_start_nodes_pos = self.pos[self.selected_indices, :2].copy()
             else:
                 # Clicked empty space: Store the current state, DO NOT clear yet
@@ -1211,8 +1221,14 @@ class MainViewer:
             delta = mouse_world - self.drag_start_mouse
             self.pos[self.selected_indices, :2] = self.drag_start_nodes_pos + delta
             
-            # Call a single optimized routine when just moving nodes
-            self.update_selection_visual()
+            if getattr(cfg, 'LOW_RESOURCE_MODE', False):
+                if not getattr(self, '_drag_edges_hidden', False):
+                    self._drag_edges_hidden = True
+                    self.update_edges()
+                self.update_nodes()
+            else:
+                self.update_selection_visual()
+            
             event.handled = True
             return
 
@@ -1232,12 +1248,16 @@ class MainViewer:
             delta = mouse_world - self.drag_start_mouse
             self.pos[self.selected_indices, :2] = self.drag_start_nodes_pos + delta
             
-            # Remove redundant calls: only call update_selection_visual once
-            self.update_selection_visual()
+            if getattr(cfg, 'LOW_RESOURCE_MODE', False):
+                if not getattr(self, '_drag_edges_hidden', False):
+                    self._drag_edges_hidden = True
+                    self.update_edges()
+                self.update_nodes()
+            else:
+                self.update_selection_visual()
             
             event.handled = True
             return
-            
         # ---> 2. BOX SELECTION DRAWING <---
         if getattr(self, 'is_box_selecting', False):
             x0, y0 = self.drag_start_mouse
@@ -1249,28 +1269,28 @@ class MainViewer:
             self.selection_box.set_data(pos=rect_pts)
             
             # --- Dynamic Highlighting Math ---
-            min_x, max_x = min(x0, x1), max(x0, x1)
-            min_y, max_y = min(y0, y1), max(y0, y1)
-            xs = self.pos[:, 0]
-            ys = self.pos[:, 1]
-            mask = (xs >= min_x) & (xs <= max_x) & (ys >= min_y) & (ys <= max_y) & self.visible_mask
-            box_indices = set(np.where(mask)[0].tolist())
-            
-            pre_drag = getattr(self, '_pre_drag_selection', set())
-            
-            if 'Shift' in event.modifiers:
-                current_selection = pre_drag.union(box_indices)     # Add
-            elif 'Control' in event.modifiers or 'Meta' in event.modifiers:
-                current_selection = pre_drag.difference(box_indices)# Remove
-            else:
-                current_selection = box_indices                     # Replace
+            if not getattr(cfg, 'LOW_RESOURCE_MODE', False):
+                min_x, max_x = min(x0, x1), max(x0, x1)
+                min_y, max_y = min(y0, y1), max(y0, y1)
+                xs = self.pos[:, 0]
+                ys = self.pos[:, 1]
+                mask = (xs >= min_x) & (xs <= max_x) & (ys >= min_y) & (ys <= max_y) & self.visible_mask
+                box_indices = set(np.where(mask)[0].tolist())
                 
-            self.selected_indices = list(current_selection)
-            self.update_selection_visual()
+                pre_drag = getattr(self, '_pre_drag_selection', set())
+                
+                if 'Shift' in event.modifiers:
+                    current_selection = pre_drag.union(box_indices)     # Add
+                elif 'Control' in event.modifiers or 'Meta' in event.modifiers:
+                    current_selection = pre_drag.difference(box_indices)# Remove
+                else:
+                    current_selection = box_indices                     # Replace
+                    
+                self.selected_indices = list(current_selection)
+                self.update_selection_visual()
             
             event.handled = True
             return
-
         # ---> 3. PANNING HUD OVERLAY <---
         # Update if we are panning (Left Click Drag only)
         if 1 in event.buttons:
@@ -1298,6 +1318,8 @@ class MainViewer:
         # ---> 1. MULTI-DRAG RELEASE <---
         if getattr(self, 'is_multi_dragging', False):
             self.is_multi_dragging = False
+            self._drag_edges_hidden = False
+            self.update_selection_visual()
             event.handled = True
             return
             
@@ -1308,10 +1330,29 @@ class MainViewer:
             
             tr = self.canvas.scene.node_transform(self.view.scene)
             mouse_world = tr.map(event.pos)[:2]
-            
             x0, y0 = self.drag_start_mouse
             x1, y1 = mouse_world
             
+            if getattr(cfg, 'LOW_RESOURCE_MODE', False) and np.hypot(x1 - x0, y1 - y0) >= 1.0:
+                min_x, max_x = min(x0, x1), max(x0, x1)
+                min_y, max_y = min(y0, y1), max(y0, y1)
+                xs = self.pos[:, 0]
+                ys = self.pos[:, 1]
+                mask = (xs >= min_x) & (xs <= max_x) & (ys >= min_y) & (ys <= max_y) & self.visible_mask
+                box_indices = set(np.where(mask)[0].tolist())
+                
+                pre_drag = getattr(self, '_pre_drag_selection', set())
+                
+                if 'Shift' in event.modifiers:
+                    current_selection = pre_drag.union(box_indices)     # Add
+                elif 'Control' in event.modifiers or 'Meta' in event.modifiers:
+                    current_selection = pre_drag.difference(box_indices)# Remove
+                else:
+                    current_selection = box_indices                     # Replace
+                    
+                self.selected_indices = list(current_selection)
+                self.update_selection_visual()
+                
             # Single click detection (no drag distance)
             if np.hypot(x1 - x0, y1 - y0) < 1.0:
                 if 'Shift' not in event.modifiers and 'Control' not in event.modifiers and 'Meta' not in event.modifiers:
