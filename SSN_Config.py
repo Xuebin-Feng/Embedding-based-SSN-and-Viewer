@@ -1753,7 +1753,11 @@ if __name__ == "__main__":
                 elif selected_cache:
                     env["SSN_TARGET_CACHE"] = selected_cache
                         
-                subprocess.Popen([sys.executable, "SSN_Viewer.py"], env=env)
+                if sys.platform == "win32":
+                    creationflags = subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0x10
+                    subprocess.Popen(["cmd.exe", "/k", sys.executable, "SSN_Viewer.py"], env=env, creationflags=creationflags)
+                else:
+                    subprocess.Popen([sys.executable, "SSN_Viewer.py"], env=env)
 
         def save_only(self):
             if self.save_settings():

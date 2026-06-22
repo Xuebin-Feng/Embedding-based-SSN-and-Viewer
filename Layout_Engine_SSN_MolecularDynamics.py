@@ -12,7 +12,7 @@ try:
     import torch
     from utilities import Hardware_Utils
     HAS_TORCH = True
-except ImportError:
+except Exception:
     HAS_TORCH = False
 
 # --- 1. Physics Kernels ---
