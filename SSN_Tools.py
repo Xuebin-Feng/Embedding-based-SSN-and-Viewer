@@ -133,7 +133,8 @@ class ToolsGUI(QMainWindow):
                 "MATRIX": "Substitution Matrix: The amino acid substitution matrix (e.g., BLOSUM62, PAM250) used to score matches/mismatches during pairwise alignment. Select based on the evolutionary distance of the sequences.",
                 "NUM_THREADS": "CPU Workers: The number of CPU threads allocated for parallel sequence alignments. Increasing threads speeds up computations on multi-core systems.",
                 "BATCH_SIZE": "Batch Size: The number of sequence pairs aligned per block. Tuning this controls memory consumption and parallel execution batch sizes.",
-                "SAFE_TEMP_DIR": "Temporary Working Directory: The directory for caching intermediate files and memory-mapped arrays during execution. Ensure it has enough free space for larger runs."
+                "SAFE_TEMP_DIR": "Temporary Working Directory: The directory for caching intermediate files and memory-mapped arrays during execution. Ensure it has enough free space for larger runs.",
+                "BLASTP_DIR": "BLASTP Directory: The folder containing your local blastp and makeblastdb binaries (usually named 'bin'). If left blank, standard system PATH directories are searched."
             },
             "Embedding_MSA.py": {
                 "INPUT_FASTA": "Sequence Set (.fasta): The raw sequence file to be aligned. These letters are aligned, padded with gaps, and output as the final Multiple Sequence Alignment (MSA).",
@@ -394,6 +395,11 @@ class ToolsGUI(QMainWindow):
                             "var_name": "SAFE_TEMP_DIR",
                             "type": "folder_browser",
                             "display": "Temporary Working Directory:"
+                        },
+                        {
+                            "var_name": "BLASTP_DIR",
+                            "type": "folder_browser",
+                            "display": "BLASTP Directory:"
                         }
                     ],
                     "Parse_BLAST_Output.py": [
@@ -1010,6 +1016,10 @@ class ToolsGUI(QMainWindow):
             
             display_name = key.replace('_', ' ').title()
             display_name = display_name.replace('Msa', 'MSA').replace('Dir', 'Directory')
+            display_name = display_name.replace('Fasta', 'FASTA')
+            display_name = display_name.replace('Embed', 'Embedding')
+            display_name = display_name.replace('Path Directory', 'Alignment Path Directory')
+            display_name = display_name.replace('Blastp', 'BLASTP')
             
             lbl = QLabel(f"{display_name}:")
             layout.addRow(lbl, ui_element)
@@ -1149,6 +1159,44 @@ class ToolsGUI(QMainWindow):
                                         actual_val = j_data[script_name][target.id]
                             except: pass
                             
+                        # Dynamic default fallbacks for GUI fields if empty or containing expressions
+                        if target.id == "SAFE_TEMP_DIR" and (actual_val is None or str(actual_val).strip() == "" or "os.path" in str(actual_val)):
+                            actual_val = os.path.normpath(os.path.join(os.path.expanduser("~"), "Alignment_TEMP"))
+                            
+                        if target.id == "BLASTP_DIR" and (actual_val is None or str(actual_val).strip() == ""):
+                            import shutil
+                            default_blastp_dir = ""
+                            blastp_path = shutil.which("blastp")
+                            if blastp_path:
+                                default_blastp_dir = os.path.dirname(os.path.abspath(blastp_path))
+                            else:
+                                if os.name == 'nt':
+                                    ncbi_dir = r"C:\Program Files\NCBI"
+                                    if os.path.exists(ncbi_dir):
+                                        try:
+                                            valid_dirs = []
+                                            for d in os.listdir(ncbi_dir):
+                                                bin_path = os.path.join(ncbi_dir, d, "bin")
+                                                if os.path.exists(os.path.join(bin_path, "blastp.exe")):
+                                                    valid_dirs.append(bin_path)
+                                            if valid_dirs:
+                                                valid_dirs.sort(reverse=True)
+                                                default_blastp_dir = valid_dirs[0]
+                                        except:
+                                            pass
+                                else:
+                                    unix_fallbacks = [
+                                        "/usr/local/ncbi/blast/bin",
+                                        "/usr/local/bin",
+                                        "/usr/bin",
+                                        "/opt/homebrew/bin"
+                                    ]
+                                    for path in unix_fallbacks:
+                                        if os.path.exists(os.path.join(path, "blastp")):
+                                            default_blastp_dir = path
+                                            break
+                            actual_val = default_blastp_dir
+                            
                         settings.append({
                             'name': target.id, 'value': val_str, 'actual_val': actual_val,
                             'lineno': node.lineno, 'node': node, 'def': defined_vars[target.id]
@@ -1170,6 +1218,10 @@ class ToolsGUI(QMainWindow):
             if var_name in skip_vars:
                 continue
                 
+            # Look up the actual value for the current variable from the parsed settings list
+            setting = next((s for s in settings if s['name'] == var_name), None)
+            actual_val = setting['actual_val'] if setting else None
+            
             if var_name == "EDGE_PREFILTERING":
                 # Create the switch button
                 switch_btn = QPushButton()

@@ -81,7 +81,7 @@ NOISE_SCALE = 0.02
 GAP_OPEN = -0.5
 GAP_EXTEND = 0.0           
 WORKERS = 1   
-SAFE_TEMP_DIR = r"C:\Alignment_TEMP"
+SAFE_TEMP_DIR = os.path.join(os.path.expanduser("~"), "Alignment_TEMP")
 SHOW_REGRESSION_PLOT = False
 POOLING_METHOD = "max"    # ("mean", "max") - method to pool residue embeddings into sequence vectors
 LENGTH_RATIO_POWER = 2.0  # (float) - exponent to scale the sequence length ratio penalty
@@ -146,6 +146,8 @@ if os.path.exists(SETTINGS_FILE):
                         globals()[k] = v
     except Exception as e:
         print(f"Failed to load user settings: {e}")
+
+# Resolve directories after config overrides
 
 # --- INFERRED PATHS ---
 # Built AFTER JSON loading so they use the overwritten variables

@@ -62,12 +62,13 @@ INPUT_FASTA = None
 MATRIX = "BLOSUM62"
 NUM_THREADS = 12
 BATCH_SIZE = 500000
-SAFE_TEMP_DIR = r"C:\Alignment_TEMP"
+BLASTP_DIR = ""
+SAFE_TEMP_DIR = os.path.join(os.path.expanduser("~"), "Alignment_TEMP")
 
-# EXECUTABLE PATHS
+# EXECUTABLE PATHS (Will be resolved dynamically after settings load)
 NCBI_BIN_DIR    = r"C:\Program Files\NCBI"
-MAKEBLASTDB_CMD = os.path.join(NCBI_BIN_DIR, r"blast-2.17.0+\bin\makeblastdb.exe")
-BLASTP_CMD      = os.path.join(NCBI_BIN_DIR, r"blast-2.17.0+\bin\blastp.exe")
+MAKEBLASTDB_CMD = "makeblastdb"
+BLASTP_CMD      = "blastp"
 
 FASTA_DIR = os.path.join("..", "Input_Files", "Sequence_Sets")
 NETWORK_DIR = os.path.join("..", "Input_Files", "Networks_EValues")
@@ -126,6 +127,63 @@ if os.path.exists(SETTINGS_FILE):
                         globals()[k] = v
     except Exception as e:
         print(f"Failed to load user settings: {e}")
+
+# Resolve BLAST commands after config overrides
+
+# Resolve BLASTP and MAKEBLASTDB paths
+if BLASTP_DIR and os.path.exists(BLASTP_DIR):
+    MAKEBLASTDB_CMD = os.path.join(BLASTP_DIR, "makeblastdb.exe" if os.name == "nt" else "makeblastdb")
+    BLASTP_CMD = os.path.join(BLASTP_DIR, "blastp.exe" if os.name == "nt" else "blastp")
+else:
+    # Fallback search if not specified or empty
+    if shutil.which("blastp") or shutil.which("blastp.exe"):
+        MAKEBLASTDB_CMD = "makeblastdb"
+        BLASTP_CMD = "blastp"
+    else:
+        # Check standard default installation folders depending on OS
+        if os.name == "nt":
+            # Search C:\Program Files\NCBI dynamically for any version of BLAST
+            ncbi_dir = r"C:\Program Files\NCBI"
+            found_dir = None
+            if os.path.exists(ncbi_dir):
+                try:
+                    valid_dirs = []
+                    for d in os.listdir(ncbi_dir):
+                        bin_path = os.path.join(ncbi_dir, d, "bin")
+                        if os.path.exists(os.path.join(bin_path, "blastp.exe")):
+                            valid_dirs.append(bin_path)
+                    if valid_dirs:
+                        valid_dirs.sort(reverse=True)
+                        found_dir = valid_dirs[0]
+                except:
+                    pass
+            
+            if found_dir:
+                MAKEBLASTDB_CMD = os.path.join(found_dir, "makeblastdb.exe")
+                BLASTP_CMD = os.path.join(found_dir, "blastp.exe")
+            else:
+                MAKEBLASTDB_CMD = "makeblastdb"
+                BLASTP_CMD = "blastp"
+        else:
+            # Unix fallback search
+            unix_fallbacks = [
+                "/usr/local/ncbi/blast/bin",
+                "/usr/local/bin",
+                "/usr/bin",
+                "/opt/homebrew/bin"
+            ]
+            found_dir = None
+            for path in unix_fallbacks:
+                if os.path.exists(os.path.join(path, "blastp")):
+                    found_dir = path
+                    break
+            
+            if found_dir:
+                MAKEBLASTDB_CMD = os.path.join(found_dir, "makeblastdb")
+                BLASTP_CMD = os.path.join(found_dir, "blastp")
+            else:
+                MAKEBLASTDB_CMD = "makeblastdb"
+                BLASTP_CMD = "blastp"
 
 # ADVANCED
 E_VALUE_CUTOFF = 1e300 # Maximum E-value threshold; sequence hit pairs evaluated above this cutoff are entirely discarded.
