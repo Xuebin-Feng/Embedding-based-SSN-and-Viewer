@@ -1753,11 +1753,20 @@ if __name__ == "__main__":
                 elif selected_cache:
                     env["SSN_TARGET_CACHE"] = selected_cache
                         
+                # Resolve script directory to ensure SSN_Viewer.py is launched from the correct working directory
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                
                 if sys.platform == "win32":
                     creationflags = subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0x10
-                    subprocess.Popen(["cmd.exe", "/k", sys.executable, "SSN_Viewer.py"], env=env, creationflags=creationflags)
+                    subprocess.Popen(
+                        ["cmd.exe", "/k", sys.executable, "SSN_Viewer.py"], 
+                        env=env, 
+                        creationflags=creationflags, 
+                        cwd=script_dir
+                    )
                 else:
-                    subprocess.Popen([sys.executable, "SSN_Viewer.py"], env=env)
+                    # GUI applications do not need a terminal window on macOS/Linux and run fine as detached processes
+                    subprocess.Popen([sys.executable, "SSN_Viewer.py"], env=env, cwd=script_dir)
 
         def save_only(self):
             if self.save_settings():

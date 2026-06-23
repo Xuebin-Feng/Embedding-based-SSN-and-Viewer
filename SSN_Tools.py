@@ -1931,13 +1931,68 @@ class ToolsGUI(QMainWindow):
             
         # 4. Run the script
         try:
-            print(f"Executing: {script_name}")
+            # Resolve script path, folder directory, and name to absolute values to avoid execution context errors
+            abs_script_path = os.path.abspath(script_path)
+            script_dir = os.path.dirname(abs_script_path)
+            script_name = os.path.basename(abs_script_path)
             
-            if os.name == 'nt':
+            print(f"Executing: {script_name} in {script_dir}")
+            
+            if sys.platform == "win32":
                 creationflags = subprocess.CREATE_NEW_CONSOLE
-                subprocess.Popen(["cmd.exe", "/k", sys.executable, script_name], creationflags=creationflags, cwd=os.path.dirname(script_path))
+                subprocess.Popen(
+                    ["cmd.exe", "/k", sys.executable, "-u", script_name],
+                    creationflags=creationflags,
+                    cwd=script_dir
+                )
+            elif sys.platform == "darwin":
+                # macOS: AppleScript to activate Terminal.app and execute the script in a new window/tab.
+                # Running terminal commands interactively naturally leaves the session open at the end.
+                escaped_dir = script_dir.replace('"', '\\"')
+                cmd_str = f'cd "{escaped_dir}" && "{sys.executable}" -u "{script_name}"'
+                escaped_cmd = cmd_str.replace('"', '\\"')
+                
+                subprocess.Popen([
+                    "osascript",
+                    "-e", 'tell application "Terminal"',
+                    "-e", 'activate',
+                    "-e", f'do script "{escaped_cmd}"',
+                    "-e", 'end tell'
+                ])
             else:
-                subprocess.Popen(["xterm", "-hold", "-e", f"{sys.executable} {script_name}"], cwd=os.path.dirname(script_path))
+                # Linux: Detect available terminal emulator and run command
+                import shutil
+                terminals = [
+                    "gnome-terminal", "konsole", "xfce4-terminal", 
+                    "mate-terminal", "lxterminal", "kitty", 
+                    "alacritty", "xterm", "x-terminal-emulator"
+                ]
+                chosen_terminal = None
+                for term in terminals:
+                    if shutil.which(term):
+                        chosen_terminal = term
+                        break
+                
+                # Change directory explicitly inside the shell command to ensure it runs from the correct directory
+                escaped_dir = script_dir.replace('"', '\\"')
+                cmd_str = f'cd "{escaped_dir}" && "{sys.executable}" -u "{script_name}"; exec bash'
+                
+                if chosen_terminal:
+                    if chosen_terminal in ["gnome-terminal", "kitty", "alacritty"]:
+                        subprocess.Popen([chosen_terminal, "--", "bash", "-c", cmd_str], cwd=script_dir)
+                    elif chosen_terminal == "konsole":
+                        subprocess.Popen(["konsole", "--hold", "-e", "bash", "-c", cmd_str], cwd=script_dir)
+                    else:
+                        # Fallback for terminals that support the -e option with a single string command
+                        subprocess.Popen([chosen_terminal, "-e", f"bash -c '{cmd_str}'"], cwd=script_dir)
+                else:
+                    # If absolutely no terminal emulator is found, run in the background as a fallback
+                    subprocess.Popen([sys.executable, "-u", script_name], cwd=script_dir)
+                    QMessageBox.warning(
+                        self, "No Terminal Emulator Found",
+                        "Could not locate a terminal emulator (e.g. gnome-terminal, xterm). "
+                        "The script has been launched in the background, but console progress output will not be visible."
+                    )
             
             QMessageBox.information(self, "Success", f"Saved configuration to JSON and launched {script_name}.")
             
