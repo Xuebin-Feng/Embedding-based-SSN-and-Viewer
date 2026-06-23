@@ -127,6 +127,7 @@ if __name__ == "__main__":
     import sys
     import subprocess
     os.environ["QT_API"] = "pyqt6"
+    os.environ["QT_MAC_WANTS_LIGHT_THEME"] = "1"
     from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                  QHBoxLayout, QTabWidget, QFormLayout, QLineEdit, 
                                  QComboBox, QPushButton, QMessageBox, QTextEdit,
@@ -1773,7 +1774,12 @@ if __name__ == "__main__":
                 QMessageBox.information(self, "Success", "Settings saved successfully!")
 
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    try:
+        from SSN_Utils import force_light_palette
+        force_light_palette(app)
+    except Exception as e:
+        print(f"Warning: Could not force light palette: {e}")
+        app.setStyle("Fusion")
     window = ConfigGUI()
     window.show()
     sys.exit(app.exec())

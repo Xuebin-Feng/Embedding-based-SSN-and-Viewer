@@ -25,6 +25,8 @@ CUSTOM_ATTRIBUTES_INIT = {
 # Fix High-DPI scaling
 os.environ["QT_API"] = "pyqt6"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+os.environ["QT_MAC_WANTS_LIGHT_THEME"] = "1"
+
 
 class MainViewer:
     def __init__(self):
@@ -169,6 +171,14 @@ class MainViewer:
             self.max_threshold = self.min_threshold + 1.0
             
         self.current_slider_threshold = self.min_threshold
+
+        # Force light theme on the QApplication managed by Vispy
+        qapp = QtWidgets.QApplication.instance()
+        if qapp:
+            try:
+                utils.force_light_palette(qapp)
+            except Exception as e:
+                print(f"Warning: Could not force light palette: {e}")
 
         # Create overlay container widget as a child of the native canvas
         self.slider_overlay = QtWidgets.QWidget(self.canvas.native)

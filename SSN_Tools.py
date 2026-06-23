@@ -10,6 +10,8 @@ MAX_CORES = os.cpu_count() or 16
 # Fix High-DPI scaling
 os.environ["QT_API"] = "pyqt6"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+os.environ["QT_MAC_WANTS_LIGHT_THEME"] = "1"
+
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTabWidget, QFormLayout, QLineEdit, 
@@ -2001,7 +2003,12 @@ class ToolsGUI(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    try:
+        from SSN_Utils import force_light_palette
+        force_light_palette(app)
+    except Exception as e:
+        print(f"Warning: Could not force light palette: {e}")
+        app.setStyle("Fusion")
     window = ToolsGUI()
     window.show()
     sys.exit(app.exec())
