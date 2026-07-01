@@ -1752,7 +1752,7 @@ class ToolsGUI(QMainWindow):
                     if is_local:
                         norm_combo.addItems(["shorter_sequence", "longer_sequence", "average_sequence"])
                         if current_norm == "alignment_length":
-                            current_norm = "shorter_sequence"
+                            current_norm = "longer_sequence"
                     else:
                         norm_combo.addItems(["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"])
                         
@@ -1876,7 +1876,7 @@ class ToolsGUI(QMainWindow):
                     if is_local:
                         norm_combo.addItems(["shorter_sequence", "longer_sequence", "average_sequence"])
                         if current_norm == "alignment_length":
-                            current_norm = "shorter_sequence"
+                            current_norm = "longer_sequence"
                     else:
                         norm_combo.addItems(["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"])
                         

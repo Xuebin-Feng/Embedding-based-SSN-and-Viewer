@@ -1113,6 +1113,7 @@ class MainViewer:
                 if hasattr(app, 'process_events'):
                     app.process_events() 
                 module.run(self, args)
+                self.update_console_background()
             else:
                 self.console_text.text = f"Error: No 'run' in {command_name}"
                 self.update_console_background()

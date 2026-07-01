@@ -338,14 +338,20 @@ def print_help(viewer, msg):
     """Prints help/errors to CLI, and a notification or status to the viewer console."""
     print(f"\n{msg}")
     
-    # Check if the message is help/error/usage (multiline, or has keywords)
-    is_help_or_error = '\n' in msg or any(k in msg.lower() for k in ['usage:', 'description:', 'error:', 'warning:', 'cancelled'])
+    # Only redirect to "Help information printed to the terminal" if it's actually help/usage (e.g. contains 'usage:' or 'description:')
+    # or is a multi-line message NOT containing 'error:' or 'warning:'.
+    is_help_or_usage = any(k in msg.lower() for k in ['usage:', 'description:']) or ('\n' in msg and not any(k in msg.lower() for k in ['error:', 'warning:']))
     
     if hasattr(viewer, 'console_text'):
-        if is_help_or_error:
+        if is_help_or_usage:
             viewer.console_text.text = "Help information printed to the terminal"
         else:
-            viewer.console_text.text = msg
+            # Display single-line status, errors, warnings, or cancellation messages directly on the on-screen console
+            first_line = msg.split('\n')[0] if '\n' in msg else msg
+            viewer.console_text.text = first_line
+        
+        if hasattr(viewer, 'update_console_background'):
+            viewer.update_console_background()
 
 
 def execute_reset(viewer, targets):
@@ -426,3 +432,5 @@ def execute_reset(viewer, targets):
     
     viewer.console_text.text = msg
     print(f"{msg}")
+    if hasattr(viewer, 'update_console_background'):
+        viewer.update_console_background()

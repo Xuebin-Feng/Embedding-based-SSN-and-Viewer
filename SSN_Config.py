@@ -579,7 +579,7 @@ if __name__ == "__main__":
             
             initial_norm = str(globals().get("NORM_MODE", "alignment_length"))
             if self.cb_score_mode.currentText() == "local" and initial_norm == "alignment_length":
-                initial_norm = "shorter_sequence"
+                initial_norm = "longer_sequence"
             self.cb_norm_mode.setCurrentText(initial_norm)
             
             ref_val = globals().get("ALIGNMENT_REFERENCE", "")
@@ -779,7 +779,7 @@ if __name__ == "__main__":
             if is_local:
                 self.cb_norm_mode.addItems(["shorter_sequence", "longer_sequence", "average_sequence"])
                 if current_norm == "alignment_length":
-                    current_norm = "shorter_sequence"
+                    current_norm = "longer_sequence"
             else:
                 self.cb_norm_mode.addItems(["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"])
                 
