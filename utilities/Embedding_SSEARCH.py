@@ -60,6 +60,8 @@ SAVING_PRECISION = "float16"
 
 FASTA_DIR = os.path.join("..", "Input_Files", "Sequence_Sets")
 EMBED_DIR = os.path.join("..", "Embeddings")
+REPORT_DIR = os.path.join("..", "Cache_Files", "Align_Report")
+GENERATE_FASTA = False
 
 # --- JSON Settings Override ---
 import json
@@ -332,62 +334,122 @@ def search_worker(args):
     elif norm_mode == "average_sequence": eff_len = (len_q + len_t) / 2.0
     else: eff_len = path_len
 
-    return {"index": idx, "header": header, "raw_score": raw, "norm_score": norm, "length": eff_len}
+    return {"index": idx, "header": header, "raw_score": raw, "norm_score": norm, "length": eff_len, "seq_len": len_t, "aln_len": path_len}
 
 # --- 5. REPORTING -------------------------------------------------------------
 def save_results(df, query_meta, db_size, seq_lookup, base_filename, query_seq, norm_mode, gap_p):
     q_head, q_len = query_meta
     
-    if norm_mode == "alignment_length": col_header = "ALN-LEN"
-    elif norm_mode == "shorter_sequence": col_header = "MIN-LEN"
-    elif norm_mode == "longer_sequence": col_header = "MAX-LEN"
-    elif norm_mode == "average_sequence": col_header = "AVG-LEN"
-    else: col_header = "LENGTH"
+    col_header = "ALN-LEN"
 
-    lines = []
-    lines.append("="*80); lines.append(f"{'PROTEIN EMBEDDING SEARCH REPORT':^80}"); lines.append("="*80)
-    lines.append(f" Query:       {q_head}")
-    lines.append(f" Query Len:   {q_len} residues")
-    lines.append(f" Database:    {INPUT_EMBED} ({db_size} sequences)")
-    lines.append(f" Mode:        {ALIGNMENT_MODE.upper()} Alignment")
-    lines.append("-" * 80)
-    lines.append(f" Parameters:  Gap Penalty = {gap_p}")
-    lines.append(f" Metric:      Raw Score / {norm_mode}")
-    lines.append(f" Filters:     Top_K={TOP_K} | Norm_Threshold={NORM_THRESHOLD}")
-    lines.append("-" * 80 + "\n")
+    # Base metadata block
+    meta_lines = []
+    meta_lines.append("="*80); meta_lines.append(f"{'PROTEIN EMBEDDING SEARCH REPORT':^80}"); meta_lines.append("="*80)
+    meta_lines.append(f" Query:       {q_head}")
+    meta_lines.append(f" Query Len:   {q_len} residues")
+    meta_lines.append(f" Database:    {INPUT_EMBED} ({db_size} sequences)")
+    meta_lines.append(f" Mode:        {ALIGNMENT_MODE.upper()} Alignment")
+    meta_lines.append("-" * 80)
+    meta_lines.append(f" Parameters:  Gap Penalty = {gap_p}")
+    meta_lines.append(f" Metric:      Raw Score / {norm_mode}")
+    meta_lines.append(f" Filters:     Top_K={TOP_K} | Norm_Threshold={NORM_THRESHOLD}")
+    meta_lines.append("-" * 80 + "\n")
     
-    if df.empty: lines.append("  [No hits found satisfying the criteria]")
+    report_lines = list(meta_lines)
+    onscreen_lines = list(meta_lines)
+    
+    if df.empty:
+        report_lines.append("  [No hits found satisfying the criteria]")
+        onscreen_lines.append("  [No hits found satisfying the criteria]")
+        xlsx_data = []
     else:
-        lines.append(f" {'RANK':<6} | {'NORM-SCR':<9} | {'RAW':<9} | {col_header:<8} | {'HEADER'}")
-        lines.append(f"{'-'*7}-+-{'-'*9}-+-{'-'*9}-+-{'-'*8}-+-{'-'*35}")
+        table_hdr = [
+            f" {'RANK':<6} | {'NORM-SCR':<9} | {'RAW':<9} | {'SEQ-LEN':<8} | {col_header:<8} | {'HEADER'}",
+            f"{'-'*7}-+-{'-'*9}-+-{'-'*9}-+-{'-'*8}-+-{'-'*8}-+-{'-'*35}"
+        ]
+        report_lines.extend(table_hdr)
+        onscreen_lines.extend(table_hdr)
+        
+        printed_hits = 0
+        rank_counter = 1
+        xlsx_data = []
         for i, row in df.iterrows():
             if row['index'] == -1: continue 
             head = row['header']
-            len_val = row['length']
-            len_str = f"{len_val:.1f}" if isinstance(len_val, float) else f"{len_val}"
-            lines.append(f" {i+1:<6} | {row['norm_score']:<9.3f} | {row['raw_score']:<9.1f} | {len_str:<8} | {head[:100]}")
+            seq_len_val = int(row['seq_len'])
+            aln_len_val = int(row['aln_len'])
+            norm_score = row['norm_score']
+            raw_score = row['raw_score']
+            
+            row_line = f" {rank_counter:<6} | {norm_score:<9.3f} | {raw_score:<9.1f} | {seq_len_val:<8} | {aln_len_val:<8} | {head}"
+            report_lines.append(row_line)
+            if printed_hits < 100:
+                onscreen_lines.append(row_line)
+                printed_hits += 1
+                
+            xlsx_data.append({
+                "Rank": rank_counter,
+                "Norm Score": float(norm_score),
+                "Raw Score": float(raw_score),
+                "Seq Len": int(seq_len_val),
+                "Aln Len": int(aln_len_val),
+                "Header": str(head)
+            })
+            
+            rank_counter += 1
+            
+        if len(df) - 1 > 100:
+            onscreen_lines.append(f"\n  [Onscreen display limited to first 100 hits. The full list of {len(df) - 1} hits is stored in the report file.]")
+            
+    print("\n".join(onscreen_lines))
     
-    report_text = "\n".join(lines)
-    print(report_text)
+    output_dir = REPORT_DIR
+    os.makedirs(output_dir, exist_ok=True)
     
-    output_dir = os.path.dirname(FULL_INPUT_FASTA)
-    if not output_dir: output_dir = "."
-    
+    report_text = "\n".join(report_lines)
     with open(os.path.join(output_dir, f"Report_{base_filename}.txt"), "w") as f: f.write(report_text)
     
-    # OUTPUT FASTA (Ranked with query at the top)
-    count = 1 
-    with open(os.path.join(output_dir, f"Hits_{base_filename}.fasta"), "w") as f:
-        f.write(f">{q_head}\n{query_seq}\n")
-        if not df.empty and seq_lookup:
-            for i, row in df.iterrows():
-                if row['index'] == -1: continue
-                head = row['header']
-                if head in seq_lookup:
-                    f.write(f">{head}\n{seq_lookup[head]}\n")
-                    count += 1
+    # Generate and save Excel Report
+    xlsx_path = os.path.join(output_dir, f"Report_{base_filename}.xlsx")
+    if not xlsx_data:
+        xlsx_df = pd.DataFrame(columns=["Rank", "Norm Score", "Raw Score", "Seq Len", "Aln Len", "Header"])
+    else:
+        xlsx_df = pd.DataFrame(xlsx_data)
+        
+    meta_data = [
+        {"Parameter": "Query Header", "Value": q_head},
+        {"Parameter": "Query Length (residues)", "Value": q_len},
+        {"Parameter": "Database", "Value": INPUT_EMBED},
+        {"Parameter": "Database Size (sequences)", "Value": db_size},
+        {"Parameter": "Alignment Mode", "Value": ALIGNMENT_MODE},
+        {"Parameter": "Gap Penalty", "Value": gap_p},
+        {"Parameter": "Normalization Mode", "Value": norm_mode},
+        {"Parameter": "Norm Score Cutoff", "Value": NORM_THRESHOLD if NORM_THRESHOLD is not None else "None"},
+        {"Parameter": "Top K", "Value": TOP_K if TOP_K is not None else "None"}
+    ]
+    meta_df = pd.DataFrame(meta_data)
     
-    print(f"[Export] {count} sequences exported to Hits_{base_filename}.fasta (Query is #1)")
+    try:
+        with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
+            xlsx_df.to_excel(writer, sheet_name="Search Results", index=False)
+            meta_df.to_excel(writer, sheet_name="Search Parameters", index=False)
+        print(f"[Export] Excel report saved to: {xlsx_path}")
+    except Exception as e:
+        print(f"[Warning] Failed to save Excel report: {e}")
+    
+    if GENERATE_FASTA:
+        # OUTPUT FASTA (Ranked with query at the top)
+        count = 1 
+        with open(os.path.join(output_dir, f"Hits_{base_filename}.fasta"), "w") as f:
+            f.write(f">{q_head}\n{query_seq}\n")
+            if not df.empty and seq_lookup:
+                for i, row in df.iterrows():
+                    if row['index'] == -1: continue
+                    head = row['header']
+                    if head in seq_lookup:
+                        f.write(f">{head}\n{seq_lookup[head]}\n")
+                        count += 1
+        print(f"[Export] {count} sequences exported to Hits_{base_filename}.fasta (Query is #1)")
 
 # --- 6. MAIN ------------------------------------------------------------------
 if __name__ == "__main__":
@@ -470,7 +532,7 @@ if __name__ == "__main__":
             df = df.head(limit)
     
     # Add dummy row for Query (Ensures it appears at the top of the text report)
-    q_row = pd.DataFrame([{"index": -1, "header": f"(Query) {query_name}", "raw_score": 0.0, "norm_score": 99.9, "length": len(query_emb)}])
+    q_row = pd.DataFrame([{"index": -1, "header": f"(Query) {query_name}", "raw_score": 0.0, "norm_score": 99.9, "length": len(query_emb), "seq_len": len(query_emb), "aln_len": len(query_emb)}])
     df = pd.concat([q_row, df], ignore_index=True)
     
     # Use custom name if provided, otherwise fallback to sanitized query name

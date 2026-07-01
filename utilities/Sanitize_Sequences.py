@@ -23,9 +23,10 @@ What this script does step-by-step:
 3. Smart Deduplication & Conflict Resolution:
    - Exact Duplicates: If multiple entries have the exact same header AND sequence, 
      it keeps only one copy.
-   - Merging (Same Sequence, Different Headers): If the exact same sequence appears 
-     multiple times under different names, it keeps only one copy of the sequence and 
-     assigns it the longest, most descriptive header name from the group.
+    - Merging (Same Sequence, Different Headers): If the exact same sequence appears 
+      multiple times under different names, it keeps only one copy of the sequence and 
+      assigns it the longest, most descriptive header name from the group (preferring 
+      headers containing "sid|").
    - Renaming (Different Sequences, Same Header): If different sequences share the 
      exact same name, it prevents data loss by keeping all sequences and renaming the 
      headers (e.g., Header_1, Header_2).
@@ -60,6 +61,7 @@ OVER_WRITE = False
 ENABLE_LENGTH_FILTER = False
 MIN_SEQ_LENGTH = None
 MAX_SEQ_LENGTH = None
+REMOVE_BY_HEADER_STRING = ""
 
 FASTA_DIR = os.path.join("..", "Input_Files", "Sequence_Sets")
 
@@ -132,6 +134,14 @@ else:
 # ==========================================
 # HELPER FUNCTIONS
 # ==========================================
+def should_remove_by_header(header, filter_string):
+    """
+    Checks if the header contains the specified filter string (case-insensitive).
+    """
+    if not filter_string or not filter_string.strip():
+        return False
+    return filter_string.strip().lower() in header.lower()
+
 def read_fasta(file_path):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"FASTA file not found: {file_path}")
@@ -233,10 +243,12 @@ if __name__ == "__main__":
     different_headers_merged = 0  # <--- NEW COUNTER for your feature
     headers_renamed = 0
     headers_sanitized_count = 0  
+    header_filtered_count = 0
     
     removed_exact_duplicate_headers = set() 
     renamed_duplicate_headers = []
     merged_header_logs = []       # <--- NEW TRACKER for your feature
+    removed_by_header_logs = []
 
     stripped_counter = Counter()
     converted_counter = Counter()
@@ -245,6 +257,12 @@ if __name__ == "__main__":
     seq_to_headers = {}
     
     for header, seq in tqdm(zip(headers, raw_seqs), total=len(headers), desc="Sanitizing & Deduplicating"):
+        # Check if we should remove by header substring
+        if should_remove_by_header(header, REMOVE_BY_HEADER_STRING):
+            header_filtered_count += 1
+            removed_by_header_logs.append(header)
+            continue
+            
         # 1. Clean the header
         safe_header, was_modified = sanitize_header(header)
         if was_modified:
@@ -278,12 +296,19 @@ if __name__ == "__main__":
             removed_exact_duplicate_headers.add(unique_headers[0])
             
         # FEATURE ADDITION: Keep the longest header if there are different headers for the same sequence
+        # (Prioritizing headers containing "sid|")
         if len(unique_headers) > 1:
-            # Sort by length descending. Secondary sort alphabetically for determinism if lengths tie.
-            unique_headers.sort(key=lambda x: (-len(x), x))
+            sid_headers = [h for h in unique_headers if "sid|" in h]
+            if sid_headers:
+                # If multiple headers contain "sid|", only compare them for length
+                sid_headers.sort(key=lambda x: (-len(x), x))
+                best_header = sid_headers[0]
+            else:
+                # Otherwise, sort all headers by length descending
+                unique_headers.sort(key=lambda x: (-len(x), x))
+                best_header = unique_headers[0]
             
-            best_header = unique_headers[0]
-            discarded_headers = unique_headers[1:]
+            discarded_headers = [h for h in unique_headers if h != best_header]
             
             different_headers_merged += len(discarded_headers)
             merged_header_logs.append((best_header, discarded_headers))
@@ -353,6 +378,7 @@ if __name__ == "__main__":
     print(f"Diff Headers Merged:       {different_headers_merged}")
     print(f"Headers Sanitized (Chars): {headers_sanitized_count}") 
     print(f"Headers Renamed (_N):      {headers_renamed}")
+    print(f"Removed by Header String:  {header_filtered_count}")
     if ENABLE_LENGTH_FILTER:
         print(f"Too Short (< {MIN_SEQ_LENGTH}):         {short_count}")
         print(f"Too Long  (> {MAX_SEQ_LENGTH}):         {long_count}")
@@ -366,9 +392,16 @@ if __name__ == "__main__":
         if len(removed_exact_duplicate_headers) > 20:
             print(f"    ... and {len(removed_exact_duplicate_headers) - 20} more.")
             
+    if removed_by_header_logs:
+        print("\n  [Removed by Header String - Headers]")
+        for h in sorted(list(set(removed_by_header_logs)))[:20]:
+            print(f"    - {h}")
+        if len(set(removed_by_header_logs)) > 20:
+            print(f"    ... and {len(set(removed_by_header_logs)) - 20} more.")
+            
     # --- NEW PRINTOUT LOGIC FOR MERGED HEADERS ---
     if merged_header_logs:
-        print("\n  [Different Headers Merged (Kept Longest)]")
+        print("\n  [Different Headers Merged (Kept Preferred/Longest)]")
         for kept, discarded in merged_header_logs[:15]:
             print(f"    - Kept: '{kept}' (Discarded: {', '.join(discarded)})")
         if len(merged_header_logs) > 15:

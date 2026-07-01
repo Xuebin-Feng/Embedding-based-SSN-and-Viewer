@@ -50,6 +50,8 @@ GLOBAL_GAP_P = 0.0
 
 FASTA_DIR = os.path.join("..", "Input_Files", "Sequence_Sets")
 EMBED_DIR = os.path.join("..", "Embeddings")
+REPORT_DIR = os.path.join("..", "Cache_Files", "Align_Report")
+GENERATE_REPORT = False
 
 # --- JSON Settings Override ---
 import json
@@ -405,6 +407,7 @@ def run_alignment(header_ref, header_tar, seq_ref_manual, seq_tar_manual, h5_pat
     print("-" * 80)
 
     # Map and print highlight positions
+    mapped_positions_lines = []
     if highlight_str and highlight_str.strip():
         ref_to_tar_map = {}
         for i, j in zip(idx_1, idx_2):
@@ -416,7 +419,9 @@ def run_alignment(header_ref, header_tar, seq_ref_manual, seq_tar_manual, h5_pat
             print("Highlight Position Mapping (Reference -> Target):")
             orig_items = [item.strip() for item in highlight_str.split(',') if item.strip()]
             for orig, mapped in zip(orig_items, mapped_items):
-                print(f"  {orig} -> {mapped}")
+                mapping_line = f"  {orig} -> {mapped}"
+                print(mapping_line)
+                mapped_positions_lines.append(mapping_line)
             print("-" * 80)
 
     # Output Parsing with ANSI Colors
@@ -448,6 +453,69 @@ def run_alignment(header_ref, header_tar, seq_ref_manual, seq_tar_manual, h5_pat
         print(f"Ref: {ref_str}")
         print(f"     {mark_str}")
         print(f"Tar: {tar_str}\n")
+
+    if GENERATE_REPORT:
+        import datetime
+        html_lines = []
+        html_lines.append("<!DOCTYPE html>")
+        html_lines.append("<html>")
+        html_lines.append("<head>")
+        html_lines.append("<meta charset='utf-8'>")
+        html_lines.append("<title>Pairwise Sequence Alignment Report</title>")
+        html_lines.append("<style>")
+        html_lines.append("body { font-family: monospace; background-color: #ffffff; color: #1e293b; padding: 20px; font-size: 14px; line-height: 1.5; }")
+        html_lines.append("pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; }")
+        html_lines.append(".highlight { color: #ef4444; font-weight: bold; }")
+        html_lines.append(".title { color: #1e40af; font-weight: bold; }")
+        html_lines.append(".header { color: #b45309; }")
+        html_lines.append(".score { color: #15803d; }")
+        html_lines.append("hr { border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0; }")
+        html_lines.append("</style>")
+        html_lines.append("</head>")
+        html_lines.append("<body>")
+        html_lines.append("<pre>")
+        
+        html_lines.append("="*80)
+        html_lines.append(f"<span class='title'>ALIGNMENT RESULT (Mode: {mode.upper()} | Score: {score:.4f})</span>")
+        html_lines.append("="*80)
+        html_lines.append(f"Reference : <span class='header'>{header_ref if not seq_ref_manual else 'Manual Input'}</span> (Length: {len_ref})")
+        html_lines.append(f"Target    : <span class='header'>{header_tar if not seq_tar_manual else 'Manual Input'}</span> (Length: {len_tar})")
+        html_lines.append(f"Align Len : {align_len}")
+        html_lines.append("-" * 80)
+        
+        if mapped_positions_lines:
+            html_lines.append("Highlight Position Mapping (Reference -> Target):")
+            html_lines.extend(mapped_positions_lines)
+            html_lines.append("-" * 80)
+            
+        for k in range(0, len(alignment_data), chunk):
+            chunk_data = alignment_data[k:k+chunk]
+            html_ref = ""
+            html_mark = ""
+            html_tar = ""
+            for c1, c2, m, is_hl in chunk_data:
+                if is_hl:
+                    html_ref += f"<span class='highlight'>{c1}</span>"
+                    html_tar += f"<span class='highlight'>{c2}</span>"
+                else:
+                    html_ref += c1
+                    html_tar += c2
+                html_mark += m
+            html_lines.append(f"Ref: {html_ref}")
+            html_lines.append(f"     {html_mark}")
+            html_lines.append(f"Tar: {html_tar}\n")
+            
+        html_lines.append("</pre>")
+        html_lines.append("</body>")
+        html_lines.append("</html>")
+        
+        os.makedirs(REPORT_DIR, exist_ok=True)
+        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_filename = f"PWA_Report_{current_time}.html"
+        report_path = os.path.join(REPORT_DIR, report_filename)
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(html_lines))
+        print(f"[Export] Alignment report saved to: {report_path}")
 
 
 # ==========================================
