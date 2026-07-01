@@ -16,9 +16,28 @@ os.environ["QT_MAC_WANTS_LIGHT_THEME"] = "1"
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTabWidget, QFormLayout, QLineEdit, 
                              QPushButton, QMessageBox, QLabel, QScrollArea, QTextEdit,
-                             QSplitter, QComboBox, QSlider, QDoubleSpinBox, QSpinBox, 
-                             QFileDialog, QStyle, QStyleOptionSlider)
+                             QTextBrowser, QSplitter, QComboBox, QSlider, QDoubleSpinBox, 
+                             QSpinBox, QFileDialog, QStyle, QStyleOptionSlider)
 from PyQt6.QtCore import Qt
+
+class ResponsiveTextBrowser(QTextBrowser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.document().setDocumentMargin(40.0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.document().setDocumentMargin(40.0)
+        
+        # We want the content area width (excluding margins) to be at least 600px
+        # Margins are 40px left + 40px right = 80px, so minimum document width is 680px
+        min_doc_width = 680.0
+        viewport_width = float(self.viewport().width())
+        
+        if viewport_width < min_doc_width:
+            self.document().setTextWidth(min_doc_width)
+        else:
+            self.document().setTextWidth(viewport_width)
 
 class NoScrollComboBox(QComboBox):
     def __init__(self, *args, **kwargs):
@@ -112,6 +131,7 @@ class ToolsGUI(QMainWindow):
                 "INPUT_FASTA": "Sequence Set (.fasta): The raw sequence file to be cleaned. Sanitization standardizes characters to uppercase, strips trailing/leading invalid symbols, and filters out non-standard elements.",
                 "ENABLE_LENGTH_FILTER": "Enable Length Filter: Toggle to filter sequences based on their amino acid length. When enabled, only sequences within the specified minimum and maximum length bounds will be retained.",
                 "OVER_WRITE": "Overwrite Original File: If enabled, the sanitized sequences will overwrite the input file. If disabled, a new file named <input_name>_sanitized.fasta will be created to preserve the original raw file.",
+                "REMOVE_BY_HEADER_STRING": "Remove Header Substring: If specified, sequences with headers containing this text (case-insensitive) will be discarded.",
                 "MIN_SEQ_LENGTH": "Minimum Sequence Length: The lower limit (inclusive) for filtering sequences by length. Sequences shorter than this number of residues will be discarded during sanitization.",
                 "MAX_SEQ_LENGTH": "Maximum Sequence Length: The upper limit (inclusive) for filtering sequences by length. Sequences longer than this number of residues will be discarded to remove outliers."
             },
@@ -191,7 +211,8 @@ class ToolsGUI(QMainWindow):
                 "HIGHLIGHT_POSITIONS": "Highlight Pos (e.g., 1, 4-6): A comma-separated list of 1-indexed residue positions or ranges to highlight in the alignment visualization.",
                 "ALIGNMENT_MODE": "Alignment Mode: Select whether to compute a global (Needleman-Wunsch) or local (Smith-Waterman) alignment based on embedding similarities.",
                 "LOCAL_GAP_P": "Local Align Gap Penalty: Gap penalty applied when using local alignment. Adjusts the frequency and size of gap insertions within local alignments.",
-                "GLOBAL_GAP_P": "Global Align Gap Penalty: Gap penalty applied when using global alignment. Adjusts the frequency and size of gap insertions across entire sequences."
+                "GLOBAL_GAP_P": "Global Align Gap Penalty: Gap penalty applied when using global alignment. Adjusts the frequency and size of gap insertions across entire sequences.",
+                "GENERATE_REPORT": "Generate Report: Toggle whether to save the pairwise alignment visualization and score into a color-coded HTML report in the report directory."
             },
             "Embedding_SSEARCH.py": {
                 "INPUT_FASTA": "Sequence Set (.fasta): The FASTA file representing the database sequence names and residues, matching the embedding file database.",
@@ -205,7 +226,8 @@ class ToolsGUI(QMainWindow):
                 "NORM_MODE": "Normalization Mode: Length-normalization formula for alignment scores to prevent bias toward longer or shorter alignments.",
                 "LOCAL_GAP_P": "Local Align Gap Penalty: Gap penalty applied when using local alignment (Smith-Waterman) to scan database embeddings.",
                 "GLOBAL_GAP_P": "Global Align Gap Penalty: Gap penalty applied when using global alignment (Needleman-Wunsch) to scan database embeddings.",
-                "WORKERS": "CPU Workers: The number of CPU threads allocated for parallel scanning. Running with more threads reduces search time."
+                "WORKERS": "CPU Workers: The number of CPU threads allocated for parallel scanning. Running with more threads reduces search time.",
+                "GENERATE_FASTA": "Generate FASTA File: Toggle whether to generate a FASTA file containing all the top hit sequences aligned with the query."
             }
         }
         
@@ -240,6 +262,11 @@ class ToolsGUI(QMainWindow):
                             "var_name": "OVER_WRITE",
                             "type": "switch",
                             "display": "Overwrite Original File:"
+                        },
+                        {
+                            "var_name": "REMOVE_BY_HEADER_STRING",
+                            "type": "text",
+                            "display": "Remove Header Substring:"
                         },
                         {
                             "var_name": "MIN_SEQ_LENGTH",
@@ -770,6 +797,11 @@ class ToolsGUI(QMainWindow):
                             "var_name": "GLOBAL_GAP_P",
                             "type": "negative_number",
                             "display": "Global Align Gap Penalty:"
+                        },
+                        {
+                            "var_name": "GENERATE_REPORT",
+                            "type": "switch",
+                            "display": "Generate Report:"
                         }
                     ],
                     "Embedding_SSEARCH.py": [
@@ -859,6 +891,11 @@ class ToolsGUI(QMainWindow):
                             "min": 1,
                             "max": MAX_CORES,
                             "display": "CPU Workers:"
+                        },
+                        {
+                            "var_name": "GENERATE_FASTA",
+                            "type": "switch",
+                            "display": "Generate FASTA File:"
                         }
                     ]
                 }
@@ -930,9 +967,9 @@ class ToolsGUI(QMainWindow):
         self.desc_title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 5px;")
         self.right_panel.addWidget(self.desc_title)
         
-        self.script_desc_text = QTextEdit()
+        self.script_desc_text = ResponsiveTextBrowser()
         self.script_desc_text.setReadOnly(True)
-        self.script_desc_text.setStyleSheet("background-color: #f8f9fa;")
+        self.script_desc_text.setStyleSheet("background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px;")
         font = self.script_desc_text.font()
         font.setPointSize(10)
         self.script_desc_text.setFont(font)
@@ -975,7 +1012,8 @@ class ToolsGUI(QMainWindow):
             "MSA_DIR": os.path.join("Input_Files","Multiple_Alignments"),
             "EMBED_DIR": os.path.join("Embeddings"),
             "NETWORK_DIR": os.path.join("Input_Files","Networks_EValues"),
-            "PATH_DIR": os.path.join("Cache_Files","Global_Path")
+            "PATH_DIR": os.path.join("Cache_Files","Global_Path"),
+            "REPORT_DIR": os.path.join("Cache_Files","Align_Report")
         }
         
         # Load existing paths from JSON if available
@@ -994,7 +1032,8 @@ class ToolsGUI(QMainWindow):
             "MSA_DIR": "Directory containing multiple sequence alignments (.fasta, .pkl).",
             "EMBED_DIR": "Directory containing language model embeddings (.h5).",
             "NETWORK_DIR": "Directory containing SSN edge networks and E-value matrices (.h5).",
-            "PATH_DIR": "Directory for caching global paths (.h5)."
+            "PATH_DIR": "Directory for caching global paths (.h5).",
+            "REPORT_DIR": "Directory for storing alignment reports and generated files."
         }
         
         for key, current_val in dir_defaults.items():
@@ -1021,6 +1060,7 @@ class ToolsGUI(QMainWindow):
             display_name = display_name.replace('Fasta', 'FASTA')
             display_name = display_name.replace('Embed', 'Embedding')
             display_name = display_name.replace('Path Directory', 'Alignment Path Directory')
+            display_name = display_name.replace('Report Directory', 'Alignment Report Directory')
             display_name = display_name.replace('Blastp', 'BLASTP')
             
             lbl = QLabel(f"{display_name}:")
@@ -1099,40 +1139,75 @@ class ToolsGUI(QMainWindow):
         if index >= 0 and index < len(self.tab_paths):
             path = self.tab_paths[index]
             if path == "DIRECTORIES_TAB":
-                self.script_desc_text.setPlainText("Global directory settings for SSN Utilities. Paths defined here are automatically loaded by all utility scripts at runtime.")
+                dir_html = (
+                    "<html><head><style>"
+                    "  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 14px; }"
+                    "  h2 { color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 18px; margin-top: 0; margin-bottom: 1.5em; }"
+                    "  p { margin-top: 0; margin-bottom: 3.6em; }"
+                    "</style></head><body>"
+                    "<h2>📂 Global Directory Settings</h2>"
+                    "<p>Define paths to folders used globally across the SSN Utilities scripts. "
+                    "These configurations are automatically saved, validated, and loaded at runtime by all scripts.</p>"
+                    "</body></html>"
+                )
+                self.script_desc_text.setHtml(dir_html)
                 return
                 
             # Get the exact name of the current tab
             tab_name = self.tabs.tabText(index)
             
-            # Formulate the target text file paths (checking both exact match and underscore match)
-            txt_name = f"{tab_name}.txt"
-            alt_txt_name = f"{tab_name.replace(' ', '_')}.txt"
+            # Formulate the target HTML file paths (checking both exact match and underscore match)
+            html_name = f"{tab_name}.html"
+            alt_html_name = f"{tab_name.replace(' ', '_')}.html"
             
-            txt_path = os.path.join("utilities", "Descriptions", txt_name)
-            alt_txt_path = os.path.join("utilities", "Descriptions", alt_txt_name)
+            html_path = os.path.join("utilities", "Descriptions", html_name)
+            alt_html_path = os.path.join("utilities", "Descriptions", alt_html_name)
             
-            docstring = ""
+            html_content = ""
             
-            # 1. Try to load the exact text file
-            if os.path.exists(txt_path):
-                with open(txt_path, "r", encoding="utf-8") as f:
-                    docstring = f.read()
+            # 1. Try to load the exact HTML file
+            if os.path.exists(html_path):
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
             # 2. Try the underscore version if the exact one fails
-            elif os.path.exists(alt_txt_path):
-                with open(alt_txt_path, "r", encoding="utf-8") as f:
-                    docstring = f.read()
+            elif os.path.exists(alt_html_path):
+                with open(alt_html_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
             
-            # 3. Fallback to the Python script's internal docstring if no text file exists
-            if not docstring.strip():
+            # 3. Fallback to the Python script's internal docstring if no HTML file exists
+            if not html_content.strip():
                 s_data = self.script_data.get(path, {})
                 docstring = s_data.get('docstring', '')
                 
-                # 4. Final placeholder if absolutely nothing is found
-                if not docstring.strip():
-                    docstring = f"No documentation file found for this tab.\n\nTo add one, create a text file named:\nutilities\\Descriptions\\{txt_name}"
+                if docstring.strip():
+                    # Wrap raw Python docstring in clean HTML with monospace code style
+                    html_content = (
+                        f"<html><head><style>"
+                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 14px; }}"
+                        f"  h2 {{ color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 18px; margin-top: 0; margin-bottom: 1.5em; }}"
+                        f"  pre {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 6px; white-space: pre-wrap; font-size: 13px; margin-bottom: 3.6em; }}"
+                        f"</style></head><body>"
+                        f"<h2>📄 Internal Documentation</h2>"
+                        f"<pre>{docstring.strip()}</pre>"
+                        f"</body></html>"
+                    )
+                else:
+                    # Final placeholder if absolutely nothing is found
+                    html_content = (
+                        f"<html><head><style>"
+                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 14px; }}"
+                        f"  h2 {{ color: #ef4444; border-bottom: 2px solid #ef4444; padding-bottom: 5px; font-size: 18px; margin-top: 0; margin-bottom: 1.5em; }}"
+                        f"  p {{ margin-top: 0; margin-bottom: 3.6em; }}"
+                        f"  code {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 12px; }}"
+                        f"</style></head><body>"
+                        f"<h2>⚠️ Documentation Missing</h2>"
+                        f"<p>No documentation file found for this tab.</p>"
+                        f"<p>To add one, create an HTML document at:<br>"
+                        f"<code>utilities\\Descriptions\\{html_name}</code></p>"
+                        f"</body></html>"
+                    )
             
-            self.script_desc_text.setPlainText(docstring.strip())
+            self.script_desc_text.setHtml(html_content.strip())
             
     def _populate_script_layout(self, layout, script_name, script_path, script_settings_def, source, tree):
         defined_vars = {item["var_name"]: item for item in script_settings_def}
@@ -1661,6 +1736,29 @@ class ToolsGUI(QMainWindow):
                 score_combo = score_input['widget']
                 norm_combo = norm_input['widget']
                 
+                def sync_local_norm_mode():
+                    if not score_combo.isEnabled():
+                        norm_combo.blockSignals(True)
+                        norm_combo.clear()
+                        norm_combo.setCurrentIndex(-1)
+                        norm_combo.blockSignals(False)
+                        return
+                    
+                    current_norm = norm_combo.currentText()
+                    norm_combo.blockSignals(True)
+                    norm_combo.clear()
+                    
+                    is_local = score_combo.currentText() == "local"
+                    if is_local:
+                        norm_combo.addItems(["shorter_sequence", "longer_sequence", "average_sequence"])
+                        if current_norm == "alignment_length":
+                            current_norm = "shorter_sequence"
+                    else:
+                        norm_combo.addItems(["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"])
+                        
+                    norm_combo.setCurrentText(current_norm)
+                    norm_combo.blockSignals(False)
+                
                 def update_msa_toggles(text):
                     is_blast = "blast" in text.lower()
                     
@@ -1678,6 +1776,9 @@ class ToolsGUI(QMainWindow):
                     score_combo.blockSignals(False)
                     norm_combo.blockSignals(False)
                     
+                    sync_local_norm_mode()
+                    
+                score_combo.currentTextChanged.connect(lambda text: sync_local_norm_mode())
                 net_combo.currentTextChanged.connect(update_msa_toggles)
                 update_msa_toggles(net_combo.currentText()) # Trigger once on load
                 
@@ -1757,6 +1858,33 @@ class ToolsGUI(QMainWindow):
                         
                 filter_switch.toggled.connect(update_length_filters)
                 update_length_filters(filter_switch.isChecked()) # Trigger once on load
+
+        if script_name == "Embedding_SSEARCH.py":
+            score_input = inputs.get("ALIGNMENT_MODE")
+            norm_input = inputs.get("NORM_MODE")
+            
+            if score_input and norm_input:
+                score_combo = score_input['widget']
+                norm_combo = norm_input['widget']
+                
+                def sync_local_norm_mode_ssearch():
+                    current_norm = norm_combo.currentText()
+                    norm_combo.blockSignals(True)
+                    norm_combo.clear()
+                    
+                    is_local = score_combo.currentText() == "local"
+                    if is_local:
+                        norm_combo.addItems(["shorter_sequence", "longer_sequence", "average_sequence"])
+                        if current_norm == "alignment_length":
+                            current_norm = "shorter_sequence"
+                    else:
+                        norm_combo.addItems(["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"])
+                        
+                    norm_combo.setCurrentText(current_norm)
+                    norm_combo.blockSignals(False)
+                    
+                score_combo.currentTextChanged.connect(lambda text: sync_local_norm_mode_ssearch())
+                sync_local_norm_mode_ssearch() # Trigger once on load
 
         btn_run = QPushButton(f"Save && Run {script_name}")
         btn_run.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 10px; margin-top: 15px;")

@@ -1,4 +1,8 @@
 import unicodedata  # Pre-load to prevent Windows DLL search path conflicts with Qt/OpenGL
+try:
+    import torch  # Pre-load to prevent DLL initialization conflicts between PyTorch and PyQt6/OpenGL
+except ImportError:
+    pass
 import sys
 import os
 import h5py
@@ -23,9 +27,51 @@ CUSTOM_ATTRIBUTES_INIT = {
 }
 
 # Fix High-DPI scaling
-os.environ["QT_API"] = "pyqt6"
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-os.environ["QT_MAC_WANTS_LIGHT_THEME"] = "1"
+class HUDDisplay:
+    def __init__(self, viewer, name, pos_fn, anchor_x='right', anchor_y='bottom'):
+        self.viewer = viewer
+        self.name = name
+        self.pos_fn = pos_fn  # lambda size: (x, y)
+        self.anchor_x = anchor_x
+        self.anchor_y = anchor_y
+        self.text_visual = None
+        self.visible = False
+
+    def show(self, text):
+        if self.text_visual is None:
+            pos = self.pos_fn(self.viewer.canvas.size)
+            self.text_visual = scene.visuals.Text(
+                text=text,
+                bold=True,
+                font_size=8,
+                color=cfg.TEXT_COLOR,
+                pos=pos,
+                anchor_x=self.anchor_x,
+                anchor_y=self.anchor_y,
+                parent=self.viewer.canvas.scene
+            )
+        else:
+            self.text_visual.text = text
+            self.text_visual.visible = True
+        self.visible = True
+
+    def hide(self):
+        if self.text_visual is not None:
+            self.text_visual.visible = False
+            self.text_visual.text = ""
+        self.visible = False
+
+    def update_position(self):
+        if self.text_visual is not None and self.visible:
+            self.text_visual.pos = self.pos_fn(self.viewer.canvas.size)
+
+    def on_node_clicked(self, node_idx):
+        """Override in subclasses to handle left-click updates."""
+        pass
+
+    def on_right_click(self):
+        """Handle right-click event. Hides by default, override if custom behavior is needed."""
+        self.hide()
 
 
 class MainViewer:
@@ -81,6 +127,7 @@ class MainViewer:
         self.drag_start_mouse = None
         self.drag_start_nodes_pos = None
         self.position_history = []  # Tracks states for Undo
+        self.hud_displays = {}
 
         # --- 2. Data Loading & Simulation ---
         self.load_and_simulate()
@@ -1049,6 +1096,11 @@ class MainViewer:
         if event.button == 2 and not self.console_mode:
             self.tooltip.text = "" 
             
+            # Clear or hide registered HUD displays
+            for display in self.hud_displays.values():
+                if getattr(display, 'on_right_click', None):
+                    display.on_right_click()
+            
             tr = self.canvas.scene.node_transform(self.view.scene)
             mouse_world = tr.map(event.pos)[:2]
             
@@ -1164,6 +1216,11 @@ class MainViewer:
                 
                 # Optionally update the HUD console text with a brief confirmation
                 self.console_text.text = f"Selected: {lbl_line1}{group_print}"
+
+                # Update any registered HUD displays
+                for display in self.hud_displays.values():
+                    if getattr(display, 'on_node_clicked', None):
+                        display.on_node_clicked(nearest_idx)
                 
             # Notice there is no 'else:' block here anymore! 
             # Clicking empty space does nothing, leaving the label intact.
@@ -1199,6 +1256,11 @@ class MainViewer:
             screen_pos = tr.inverse.map(self.pos[self.selected_node_idx])
 
             self.tooltip.pos = screen_pos[:2] + [15, -15]
+
+        # 4. Update any registered HUD displays
+        for display in self.hud_displays.values():
+            if getattr(display, 'update_position', None):
+                display.update_position()
             
         self.canvas.update()
 

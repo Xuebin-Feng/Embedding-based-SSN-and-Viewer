@@ -261,7 +261,7 @@ if __name__ == "__main__":
             self.stat_display = QTextEdit()
             self.stat_display.setReadOnly(True)
             self.stat_display.setPlaceholderText("Select Fasta subset and HDF5 Network file, then click compute.")
-            self.stat_display.setStyleSheet("font-family: Consolas; background-color: #f5f5f5;")
+            self.stat_display.setStyleSheet("font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; background-color: #f5f5f5;")
             self.right_layout.addWidget(self.stat_label)
             self.right_layout.addWidget(self.stat_display)
             
@@ -571,9 +571,15 @@ if __name__ == "__main__":
             add_row("ALIGNMENT_SCORE", "Alignment Score Mode:", self.cb_score_mode)
             
             self.cb_norm_mode = NoScrollComboBox()
-            self.cb_norm_mode.addItems(["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"])
-            self.cb_norm_mode.setCurrentText(str(globals().get("NORM_MODE", "alignment_length")))
             add_row("NORM_MODE", "Normalization Mode:", self.cb_norm_mode)
+            
+            self.cb_score_mode.currentTextChanged.connect(self.update_norm_mode_options)
+            self.update_norm_mode_options()
+            
+            initial_norm = str(globals().get("NORM_MODE", "alignment_length"))
+            if self.cb_score_mode.currentText() == "local" and initial_norm == "alignment_length":
+                initial_norm = "shorter_sequence"
+            self.cb_norm_mode.setCurrentText(initial_norm)
             
             ref_val = globals().get("ALIGNMENT_REFERENCE", "")
             self.line_ref = QLineEdit("" if ref_val in [None, "None"] else str(ref_val))
@@ -761,6 +767,24 @@ if __name__ == "__main__":
 
             self.tabs.addTab(tab, "Inputs && Outputs")
             
+        def update_norm_mode_options(self):
+            if not hasattr(self, 'cb_score_mode') or not hasattr(self, 'cb_norm_mode'):
+                return
+            current_norm = self.cb_norm_mode.currentText()
+            self.cb_norm_mode.blockSignals(True)
+            self.cb_norm_mode.clear()
+            
+            is_local = self.cb_score_mode.currentText() == "local"
+            if is_local:
+                self.cb_norm_mode.addItems(["shorter_sequence", "longer_sequence", "average_sequence"])
+                if current_norm == "alignment_length":
+                    current_norm = "shorter_sequence"
+            else:
+                self.cb_norm_mode.addItems(["alignment_length", "shorter_sequence", "longer_sequence", "average_sequence"])
+                
+            self.cb_norm_mode.setCurrentText(current_norm)
+            self.cb_norm_mode.blockSignals(False)
+
         def update_live_validators(self):
             has_fasta = bool(self.cb_fasta.currentText().strip())
             has_hdf5 = bool(self.cb_hdf5.currentText().strip())
