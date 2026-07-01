@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    background-color: #ffffff;
+    line-height: 1.2;
+    font-size: 14px;
+  }
+  h1, h2, h3 {
+    color: #0f172a;
+    font-weight: 700;
+  }
+  h1 {
+    font-size: 18px;
+    border-bottom: 2px solid #1e3a8a;
+    padding-bottom: 6px;
+    color: #1e3a8a;
+    margin-top: 0;
+    margin-bottom: 1.5em;
+  }
+  h2 {
+    font-size: 15px;
+    color: #0f172a;
+    margin-top: 2.5em;
+    margin-bottom: 1.2em;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+  }
+  p {
+    margin-top: 0;
+    margin-bottom: 3.6em;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    background-color: #f1f5f9;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #0f172a;
+  }
+  table.param-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1.5em;
+    margin-bottom: 3.6em;
+    font-size: 13px;
+    table-layout: auto;
+  }
+  table.param-table th, table.param-table td {
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+  }
+  table.param-table th {
+    background-color: #f1f5f9;
+    font-weight: 600;
+    color: #475569;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  table.param-table tr:hover td {
+    background-color: #f8fafc;
+  }
+  .info-box {
+    background-color: #f8fafc;
+    border-left: 4px solid #1e3a8a;
+    padding: 15px;
+    margin-bottom: 3.6em;
+    border-radius: 0 6px 6px 0;
+  }
+  .info-title {
+    font-weight: bold;
+    color: #1e3a8a;
+    margin-bottom: 1em;
+  }
+</style>
+</head>
+<body>
+<h1>🧬 Pairwise & Search Utilities</h1>
+
+<h2>⚔️ Pairwise Embedding Alignment (<code>Embedding_PWA.py</code>)</h2>
+<p>This script computes a Pairwise Sequence Alignment (PWA) between exactly two sequences using protein language model embeddings. It calculates residue-level Euclidean distances between sequence embedding tensors, standardizes these values, and applies local (Smith-Waterman) or global (Needleman-Wunsch) dynamic programming to find the optimal path. The script outputs a text-based alignment visualization to the console, showing matching and mismatching segments along with their similarity scores. It supports highlighting specific residue positions to assist in analyzing structural conservation.</p>
+
+<h3>⚙️ Parameters</h3>
+<table class='param-table'>
+  <thead>
+    <tr>
+      <th style="width: 30%;">Parameter</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>INPUT_FASTA</code></td>
+      <td>The FASTA file containing sequences to align. Used to retrieve headers and raw sequence strings.</td>
+    </tr>
+    <tr>
+      <td><code>INPUT_EMBED</code></td>
+      <td>The HDF5 embedding database containing the dense residue embedding vectors.</td>
+    </tr>
+    <tr>
+      <td><code>REF_HEADER</code></td>
+      <td>The exact header string of the reference sequence to be aligned.</td>
+    </tr>
+    <tr>
+      <td><code>REF_SEQUENCE</code></td>
+      <td>Optional: A raw amino acid sequence string to use as the reference, overriding the header lookup.</td>
+    </tr>
+    <tr>
+      <td><code>TAR_HEADER</code></td>
+      <td>The exact header string of the target sequence to be aligned.</td>
+    </tr>
+    <tr>
+      <td><code>TAR_SEQUENCE</code></td>
+      <td>Optional: A raw amino acid sequence string to use as the target, overriding the header lookup.</td>
+    </tr>
+    <tr>
+      <td><code>HIGHLIGHT_POSITIONS</code></td>
+      <td>Comma-separated list of residue numbers or ranges (1-indexed, e.g., '1, 4-6, 12') to highlight in the final console visualization.</td>
+    </tr>
+    <tr>
+      <td><code>ALIGNMENT_MODE</code></td>
+      <td>Select whether to compute a 'global' or 'local' alignment.</td>
+    </tr>
+    <tr>
+      <td><code>LOCAL_GAP_P</code></td>
+      <td>The gap penalty score applied for local alignments.</td>
+    </tr>
+    <tr>
+      <td><code>GLOBAL_GAP_P</code></td>
+      <td>The gap penalty score applied for global alignments.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 25px 0;">
+
+<h2>🔍 Embedding Database Search (<code>Embedding_SSEARCH.py</code>)</h2>
+<p>This script performs a one-vs-all database search using sequence embeddings. Similar to traditional SSEARCH or BLAST, it takes a query sequence and scans it against a target database of sequence embeddings. It computes pairwise alignments using local or global embedding dynamic programming across multiple CPU threads, normalizes scores to prevent alignment length biases, and writes two output files: a ranked hits text report and a FASTA file containing all top-scoring sequences.</p>
+
+<h3>⚙️ Parameters</h3>
+<table class='param-table'>
+  <thead>
+    <tr>
+      <th style="width: 30%;">Parameter</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>INPUT_FASTA</code></td>
+      <td>The sequence FASTA file associated with the embedding database.</td>
+    </tr>
+    <tr>
+      <td><code>INPUT_EMBED</code></td>
+      <td>The HDF5 embedding database file to scan against.</td>
+    </tr>
+    <tr>
+      <td><code>QUERY_HEADER</code></td>
+      <td>The header of a sequence in the FASTA file to use as the query.</td>
+    </tr>
+    <tr>
+      <td><code>QUERY_SEQUENCE</code></td>
+      <td>Optional: A raw amino acid sequence string to search with, overriding the header lookup.</td>
+    </tr>
+    <tr>
+      <td><code>OUTPUT_NAME</code></td>
+      <td>Optional: A custom prefix for output files. If blank, uses the query header.</td>
+    </tr>
+    <tr>
+      <td><code>TOP_K</code></td>
+      <td>The maximum number of top-ranking hits to output.</td>
+    </tr>
+    <tr>
+      <td><code>NORM_THRESHOLD</code></td>
+      <td>Optional: The minimum normalized score required for a sequence to be saved.</td>
+    </tr>
+    <tr>
+      <td><code>ALIGNMENT_MODE</code></td>
+      <td>Whether to perform local (Smith-Waterman) or global (Needleman-Wunsch) searches.</td>
+    </tr>
+    <tr>
+      <td><code>NORM_MODE</code></td>
+      <td>The length-normalization formula applied to score calculations (e.g., alignment_length, shorter_sequence, longer_sequence, average_sequence).</td>
+    </tr>
+    <tr>
+      <td><code>LOCAL_GAP_P</code></td>
+      <td>The gap penalty applied for local database scanning.</td>
+    </tr>
+    <tr>
+      <td><code>GLOBAL_GAP_P</code></td>
+      <td>The gap penalty applied for global database scanning.</td>
+    </tr>
+    <tr>
+      <td><code>WORKERS</code></td>
+      <td>The number of CPU threads allocated for parallel database searching.</td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    background-color: #ffffff;
+    line-height: 1.2;
+    font-size: 14px;
+  }
+  h1, h2, h3 {
+    color: #0f172a;
+    font-weight: 700;
+  }
+  h1 {
+    font-size: 18px;
+    border-bottom: 2px solid #1e3a8a;
+    padding-bottom: 6px;
+    color: #1e3a8a;
+    margin-top: 0;
+    margin-bottom: 1.5em;
+  }
+  h2 {
+    font-size: 15px;
+    color: #0f172a;
+    margin-top: 2.5em;
+    margin-bottom: 1.2em;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+  }
+  p {
+    margin-top: 0;
+    margin-bottom: 3.6em;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    background-color: #f1f5f9;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #0f172a;
+  }
+  table.param-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1.5em;
+    margin-bottom: 3.6em;
+    font-size: 13px;
+    table-layout: auto;
+  }
+  table.param-table th, table.param-table td {
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+  }
+  table.param-table th {
+    background-color: #f1f5f9;
+    font-weight: 600;
+    color: #475569;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  table.param-table tr:hover td {
+    background-color: #f8fafc;
+  }
+  .info-box {
+    background-color: #f8fafc;
+    border-left: 4px solid #1e3a8a;
+    padding: 15px;
+    margin-bottom: 3.6em;
+    border-radius: 0 6px 6px 0;
+  }
+  .info-title {
+    font-weight: bold;
+    color: #1e3a8a;
+    margin-bottom: 1em;
+  }
+</style>
+</head>
+<body>
+<h1>💥 Align Substitution Matrix</h1>
+
+<h2>🧬 Substitution Matrix Alignment (<code>Align_Substitution_Matrix.py</code>)</h2>
+<p>This script computes an all-vs-all sequence similarity network (SSN) using traditional substitution matrices (like BLOSUM62 or PAM250) instead of embeddings. It automates this by building a local NCBI BLAST database from the input sequence FASTA file and executing pairwise alignments using the BLASTP engine. The output statistical E-values are converted into linear -Log10(E-Value) score formats to represent edge connections in the output HDF5 network, which can be visualized in the SSN viewer.</p>
+
+<h3>⚙️ Parameters</h3>
+<table class='param-table'>
+  <thead>
+    <tr>
+      <th style="width: 30%;">Parameter</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>INPUT_FASTA</code></td>
+      <td>The input sequence file (in FASTA format) containing sequences to be aligned against each other.</td>
+    </tr>
+    <tr>
+      <td><code>MATRIX</code></td>
+      <td>The amino acid substitution matrix used for traditional scoring during BLAST alignments (e.g., BLOSUM45, BLOSUM50, BLOSUM62, BLOSUM80, BLOSUM90, PAM30, PAM70, PAM250).</td>
+    </tr>
+    <tr>
+      <td><code>NUM_THREADS</code></td>
+      <td>The number of CPU threads allocated for BLASTP execution and parsing.</td>
+    </tr>
+    <tr>
+      <td><code>BATCH_SIZE</code></td>
+      <td>The number of parsed alignments accumulated in memory before writing to disk, protecting system RAM.</td>
+    </tr>
+    <tr>
+      <td><code>SAFE_TEMP_DIR</code></td>
+      <td>The temporary directory used to cache intermediate query segments and BLAST output files during the parallel run.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 25px 0;">
+
+<h2>🔍 Parse BLAST Output (<code>Parse_BLAST_Output.py</code>)</h2>
+<p>This script parses an externally generated NCBI BLAST tabular output file (outfmt 6) and converts it into a compatible HDF5 similarity network for visualization. It processes sequence alignments by mapping headers to sequence indices, converting statistical E-values into linear -Log10(E) connectivity scores, deduplicating undirected redundant edges, and serializing the final data directly into the HDF5 network format.</p>
+
+<h3>⚙️ Parameters</h3>
+<table class='param-table'>
+  <thead>
+    <tr>
+      <th style="width: 30%;">Parameter</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>INPUT_BLAST_TABULAR</code></td>
+      <td>The path to the externally generated BLAST output file in tab-separated tabular format (containing query ID, subject ID, E-value, percent identity, etc.).</td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>

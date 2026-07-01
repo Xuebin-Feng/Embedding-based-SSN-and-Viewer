@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    background-color: #ffffff;
+    line-height: 1.2;
+    font-size: 14px;
+  }
+  h1, h2, h3 {
+    color: #0f172a;
+    font-weight: 700;
+  }
+  h1 {
+    font-size: 18px;
+    border-bottom: 2px solid #1e3a8a;
+    padding-bottom: 6px;
+    color: #1e3a8a;
+    margin-top: 0;
+    margin-bottom: 1.5em;
+  }
+  h2 {
+    font-size: 15px;
+    color: #0f172a;
+    margin-top: 2.5em;
+    margin-bottom: 1.2em;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+  }
+  p {
+    margin-top: 0;
+    margin-bottom: 3.6em;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    background-color: #f1f5f9;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #0f172a;
+  }
+  table.param-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1.5em;
+    margin-bottom: 3.6em;
+    font-size: 13px;
+    table-layout: auto;
+  }
+  table.param-table th, table.param-table td {
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+  }
+  table.param-table th {
+    background-color: #f1f5f9;
+    font-weight: 600;
+    color: #475569;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  table.param-table tr:hover td {
+    background-color: #f8fafc;
+  }
+  .info-box {
+    background-color: #f8fafc;
+    border-left: 4px solid #1e3a8a;
+    padding: 15px;
+    margin-bottom: 3.6em;
+    border-radius: 0 6px 6px 0;
+  }
+  .info-title {
+    font-weight: bold;
+    color: #1e3a8a;
+    margin-bottom: 1em;
+  }
+</style>
+</head>
+<body>
+<h1>🧪 Sequence & Embedding Prep</h1>
+
+<h2>🧼 Sanitize Sequences (<code>Sanitize_Sequences.py</code>)</h2>
+<p>This script prepares a raw FASTA file of protein sequences for downstream embedding generation and similarity calculations. It ensures sequence integrity by standardizing all amino acid characters to uppercase, removing leading or trailing non-standard symbols, and replacing internal invalid characters or gaps with the 'X' mask token. In addition, it filters out sequences that fall outside a specified minimum and maximum length threshold to remove fragment and outlier sequences. After processing, it generates a histogram visualizing the length distribution of the sanitized sequence set.</p>
+
+<h3>⚙️ Parameters</h3>
+<table class='param-table'>
+  <thead>
+    <tr>
+      <th style="width: 30%;">Parameter</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>INPUT_FASTA</code></td>
+      <td>The input sequence file (in FASTA format) to be sanitized.</td>
+    </tr>
+    <tr>
+      <td><code>ENABLE_LENGTH_FILTER</code></td>
+      <td>A toggle indicating whether sequences should be filtered by their amino acid length.</td>
+    </tr>
+    <tr>
+      <td><code>OVER_WRITE</code></td>
+      <td>If set to ON, the original input file will be overwritten with the sanitized sequences. If OFF, a new file with the suffix '_sanitized.fasta' will be generated.</td>
+    </tr>
+    <tr>
+      <td><code>MIN_SEQ_LENGTH</code></td>
+      <td>The minimum sequence length (number of residues) required for a sequence to be retained. Shorter sequences are discarded.</td>
+    </tr>
+    <tr>
+      <td><code>MAX_SEQ_LENGTH</code></td>
+      <td>The maximum sequence length (number of residues) permitted for a sequence to be retained. Longer sequences are discarded.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr style="border: 0; border-top: 1px solid #cbd5e1; margin: 25px 0;">
+
+<h2>🧠 Generate Embeddings (<code>Generate_Embeddings.py</code>)</h2>
+<p>This script computes dense, high-dimensional vector representations (embeddings) for each protein sequence using pre-trained protein Language Models (pLMs). These embeddings capture the structural, evolutionary, and biophysical properties of the sequences at a residue level. The embeddings are stored in a serialized HDF5 database, where each sequence is mapped to a dataset containing its residue-level embeddings. This HDF5 format allows high-performance downstream similarity matrix and alignment computations.</p>
+
+<h3>⚙️ Parameters</h3>
+<table class='param-table'>
+  <thead>
+    <tr>
+      <th style="width: 30%;">Parameter</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>INPUT_FASTA</code></td>
+      <td>The sanitized input sequence FASTA file to generate embeddings for.</td>
+    </tr>
+    <tr>
+      <td><code>MODEL_NAME</code></td>
+      <td>The protein language model to load. Choices include ESM-C models (esmc_300m, esmc_600m), ProtBERT, or ProstT5. Larger models capture richer features but require more GPU memory and processing time.</td>
+    </tr>
+    <tr>
+      <td><code>SAVING_MODE</code></td>
+      <td>The floating-point precision for storing the embedding tensors. 'float16' is recommended as it halves file size and memory requirements with minimal loss in representation precision, whereas 'float32' retains standard uncompressed precision.</td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>
