@@ -19,6 +19,7 @@ def print_help():
       Selects nodes using complex boolean logic. Matches can be Amino Acid 
       positions, Header substrings, Clusters, Groups, or external Files.
       
+      * IMPORTANT: This command only applies to and selects visible nodes.
       * IMPORTANT: Do NOT use spaces inside your expressions!
 
     Modes:
@@ -195,7 +196,8 @@ def run(viewer, args):
 
     try:
         mask = Command_Engine.parse_advanced_expression(expr, viewer_to_aln, valid_indices, viewer.full_headers, getattr(viewer, 'cluster_labels', None), getattr(viewer, 'group_labels', None), getattr(viewer, 'alignment', None), metadata=getattr(viewer, 'metadata', None))
-        new_indices = set(np.where(mask)[0].tolist())
+        visible_indices = set(np.where(viewer.visible_mask)[0].tolist())
+        new_indices = set(np.where(mask)[0].tolist()).intersection(visible_indices)
     except Exception as e:
         viewer.console_text.text = f"Selection Error: {e}"
         print(f"\nError processing '{expr}': {e}")

@@ -21,13 +21,13 @@ def print_help():
       clusters : Exports sequences based on their assigned topology cluster ID. 
                  (Note: Unclustered 'Noise' nodes are automatically ignored).
       groups   : Exports separate .fasta files for ALL custom group labels currently defined.
-      #[Name]# : Exports only specific groups by enclosing the name in # (e.g., #kinase#).
-                 You can chain multiple specific groups (e.g., export #kinase# #receptor#).
+      group:<Name> : Exports only specific groups by prefixing with group: (e.g., group:kinase).
+                     You can chain multiple specific groups (e.g., export group:kinase group:receptor).
 
     Examples:
       export             (Defaults to exporting all clusters)
       export groups      (Exports all custom groups)
-      export #human#     (Exports only the sequences in the 'human' group)
+      export group:human (Exports only the sequences in the 'human' group)
     """)
     
 def run(viewer, args):
@@ -47,9 +47,9 @@ def run(viewer, args):
             target_mode = "clusters"
         elif arg_lower == "groups":
             target_mode = "groups"
-        elif arg_lower.startswith("#") and arg_lower.endswith("#"):
+        elif arg_lower.startswith("group:"):
             target_mode = "specific"
-            specific_groups.append(arg_lower.strip("#"))
+            specific_groups.append(arg_lower[6:].strip())
 
     # --- Validations ---
     if target_mode == "clusters" and getattr(viewer, 'cluster_labels', None) is None:
