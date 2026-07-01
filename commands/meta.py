@@ -60,7 +60,7 @@ def run(viewer, args):
     if args and args[0].lower() in ['help', '-h', '--help']:
         print_help(meta_dir)
         if hasattr(viewer, 'console_text'):
-            viewer.console_text.text = "Help information printed to the console."
+            viewer.console_text.text = "Help information printed to the terminal"
         return
 
     # --- 1.5. Display/Show Property ---

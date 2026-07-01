@@ -31,7 +31,7 @@ def run(viewer, args):
     if args and args[0].lower() in ['help', '-h', '--help']:
         print_help()
         if hasattr(viewer, 'console_text'):
-            viewer.console_text.text = "Help printed to console."
+            viewer.console_text.text = "Help information printed to the terminal"
         return
 
     # Check for list argument

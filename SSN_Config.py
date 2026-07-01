@@ -1,6 +1,7 @@
 import unicodedata  # Pre-load to prevent Windows DLL search path conflicts with Qt/OpenGL
 # Import Libraries
 import os
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
 
 # --- Placeholder Parameters ---
 SEQUENCE_SET = None
@@ -1784,7 +1785,7 @@ if __name__ == "__main__":
                 if sys.platform == "win32":
                     creationflags = subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0x10
                     subprocess.Popen(
-                        ["cmd.exe", "/k", sys.executable, "SSN_Viewer.py"], 
+                        f'cmd.exe /c ""{sys.executable}" SSN_Viewer.py || pause"', 
                         env=env, 
                         creationflags=creationflags, 
                         cwd=script_dir

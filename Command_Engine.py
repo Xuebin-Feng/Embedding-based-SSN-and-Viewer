@@ -335,12 +335,17 @@ def parse_advanced_expression(expr, viewer_to_aln, valid_indices, full_headers, 
         raise ValueError(f"Invalid logic expression: {final_expr}. Ensure no spaces exist inside the logic.")
 
 def print_help(viewer, msg):
-    """Prints help to HUD, and selectively to CLI."""
-    viewer.console_text.text = msg
-    if '\n' in msg:
-        print("\nPlease see the viewer console for details.")
-    else:
-        print(f"\n{msg}")
+    """Prints help/errors to CLI, and a notification or status to the viewer console."""
+    print(f"\n{msg}")
+    
+    # Check if the message is help/error/usage (multiline, or has keywords)
+    is_help_or_error = '\n' in msg or any(k in msg.lower() for k in ['usage:', 'description:', 'error:', 'warning:', 'cancelled'])
+    
+    if hasattr(viewer, 'console_text'):
+        if is_help_or_error:
+            viewer.console_text.text = "Help information printed to the terminal"
+        else:
+            viewer.console_text.text = msg
 
 
 def execute_reset(viewer, targets):

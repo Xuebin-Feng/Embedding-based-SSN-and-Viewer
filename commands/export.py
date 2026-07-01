@@ -34,7 +34,7 @@ def run(viewer, args):
     if args and args[0].lower() in ['help', '-h', '-?']:
         print_help()
         if hasattr(viewer, 'console_text'):
-            viewer.console_text.text = "Help information printed to the console."
+            viewer.console_text.text = "Help information printed to the terminal"
         return
 
     # --- 1. Parse Arguments ---

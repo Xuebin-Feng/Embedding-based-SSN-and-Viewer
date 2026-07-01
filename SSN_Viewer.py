@@ -5,6 +5,7 @@ except ImportError:
     pass
 import sys
 import os
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
 import h5py
 import numpy as np
 import importlib
@@ -78,6 +79,51 @@ class MainViewer:
     def __init__(self):
         # --- 1. Viewer State ---
         self.console_mode = False
+        
+        # =========================================================================
+        # HUD & CONSOLE LAYOUT CONFIGURATION SECTION
+        # Users can adjust the positions, sizes, and padding of the text and 
+        # background elements below. Adjust these coordinates if elements do not
+        # align correctly on your screen or High-DPI display.
+        # Note: All coordinates are defined in logical pixels and are automatically
+        # scaled by the canvas pixel scale (DPI factor) at runtime.
+        # =========================================================================
+        self.hud_layout = {
+            # 1. Top-left Instructions (" [ENTER] Command | [LeftClick] Label | ... ")
+            "instr_x": 10.0,             # Horizontal coordinate from left edge
+            "instr_y": 10.0,             # Vertical coordinate from top edge (baseline)
+            "instr_anchor_x": "left",    # Horizontal text alignment: 'left', 'center', 'right'
+            "instr_anchor_y": "bottom",  # Vertical text alignment: 'top', 'middle', 'bottom'
+            
+            # 2. Command Line Text (" Cmd: <input> ")
+            "console_text_x": 30.0,      # Horizontal coordinate from left edge
+            "console_text_y": 60.0,      # Vertical coordinate from top edge (baseline)
+            "console_text_anchor_x": "left",
+            "console_text_anchor_y": "bottom",
+            "console_font_family": "Open Sans", # Font family used to measure text width
+            "console_font_size": 8,      # Font size used to measure text width
+            
+            # 3. Command Line Background Box
+            "console_bg_center_y": 35.0, # Vertical center of the background box
+            "console_bg_height": 20.0,   # Vertical height of the background box
+            "console_bg_min_width": 150.0, # Minimum width of the background box when empty/short
+            "console_bg_left_offset": 10.0, # Fixed horizontal left position of the box
+            "console_bg_radius": 6.0,    # Radius for the rounded corners (0.0 for sharp corners)
+            "console_bg_padding_x": 20.0, # Fixed logical padding added to the end of the command box
+            
+            # 4. Zoom Indicator Text (" View Width: XXX ") at bottom-right
+            "zoom_x_offset": 10.0,       # Distance from the right edge of the window
+            "zoom_y_offset": 55.0,       # Distance from the bottom edge of the window (original default)
+            "zoom_anchor_x": "right",
+            "zoom_anchor_y": "bottom",
+            
+            # 5. Hidden Nodes Indicator Text (" Hidden Nodes: X ") at bottom-right
+            "hidden_x_offset": 10.0,     # Distance from the right edge of the window
+            "hidden_y_offset": 30.0,     # Distance from the bottom edge of the window (original default)
+            "hidden_anchor_x": "right",
+            "hidden_anchor_y": "bottom"
+        }
+        
         self.input_buffer = ""
         self.cursor_pos = 0       # Tracks cursor position
         
@@ -305,7 +351,70 @@ class MainViewer:
         buf = self.input_buffer
         c = self.cursor_pos
         self.console_text.text = f"Cmd: {buf[:c]}_{buf[c:]}"
+        self.update_console_background()
         self.canvas.update()
+
+    def update_console_background(self):
+        """Dynamically resize and position the console background based on text length."""
+        if not hasattr(self, 'console_bg') or not hasattr(self, 'console_text'):
+            return
+        
+        cfg_hud = self.hud_layout
+        scale = getattr(self.canvas, 'pixel_scale', 1.0)
+        
+        # Calculate exact logical text width from VisPy's own glyph metrics
+        text_visual = self.console_text
+        logical_width = 0.0
+        if text_visual.text and hasattr(text_visual, '_font'):
+            font = text_visual._font
+            dpi = text_visual.transforms.dpi
+            font_size = text_visual.font_size
+            n_pix = (font_size / 72.0) * dpi
+            
+            ratio = 0.25
+            width_val = 0.0
+            prev = None
+            for char in text_visual.text:
+                glyph = font[char]
+                kerning = glyph['kerning'].get(prev, 0.0) * ratio
+                x_move = glyph['advance'] * ratio + kerning
+                width_val += x_move
+                prev = char
+            logical_width = (width_val / 64.0) * n_pix
+            
+        # Calculate physical left edge of the box
+        left_edge_physical = cfg_hud["console_bg_left_offset"] * scale
+        
+        # Calculate physical left gap between box start and text start
+        left_gap_physical = (cfg_hud["console_text_x"] - cfg_hud["console_bg_left_offset"]) * scale
+        
+        # Calculate physical text width (which scales with High-DPI screen factor)
+        text_width_physical = logical_width
+        
+        # Fixed physical padding added to the end of the text
+        padding_x = cfg_hud.get("console_bg_padding_x", 20.0)
+        
+        # Determine background width in physical units, constrained by canvas size
+        min_width_physical = cfg_hud["console_bg_min_width"] * scale
+        max_width_physical = max(min_width_physical, self.canvas.size[0] - 40) if hasattr(self, 'canvas') and self.canvas.size else 1000
+        
+        # Physical width = left gap + physical text width + right padding
+        desired_width_physical = left_gap_physical + text_width_physical + padding_x
+        width_physical = min(max_width_physical, max(min_width_physical, desired_width_physical))
+        
+        # Height and radius in physical units
+        height_physical = cfg_hud["console_bg_height"] * scale
+        radius_physical = cfg_hud["console_bg_radius"] * scale
+        
+        # Center coordinates in physical units
+        center_x_physical = left_edge_physical + width_physical / 2.0
+        center_y_physical = cfg_hud["console_bg_center_y"] * scale
+        
+        # Apply physical values directly
+        self.console_bg.width = width_physical
+        self.console_bg.height = height_physical
+        self.console_bg.radius = radius_physical
+        self.console_bg.center = (center_x_physical, center_y_physical)
 
     def load_and_simulate(self):
             """
@@ -901,13 +1010,63 @@ class MainViewer:
         self._update_hud_elements()
 
     def create_hud(self):
-        self.instr_text = scene.visuals.Text(text="[ENTER] Command | [LeftClick] Label | [RightClick] Select/Clear | [Scroll] Zoom | [Shift + LeftClick] Copy Node Header | [LeftClick + Drag] Pan | [RightClick + Drag] GroupSelect/MoveNodes", \
-            bold=False, font_size=8, color='gray', pos=(10, 10), anchor_y='bottom', anchor_x='left', parent=self.canvas.scene)
-        self.console_bg = scene.visuals.Rectangle(center=(520, 70), width=1000, height=40, color=(0.95, 0.95, 0.95, 0.95), border_color='black', parent=self.canvas.scene)
+        cfg_hud = self.hud_layout
+        scale = getattr(self.canvas, 'pixel_scale', 1.0)
+        
+        self.instr_text = scene.visuals.Text(
+            text="[ENTER] Command | [LeftClick] Label | [RightClick] Select/Clear | [Scroll] Zoom | [Shift + LeftClick] Copy Node Header | [LeftClick + Drag] Pan | [RightClick + Drag] GroupSelect/MoveNodes",
+            bold=False, 
+            font_size=8, 
+            color='gray', 
+            pos=(cfg_hud["instr_x"], cfg_hud["instr_y"]), 
+            anchor_y=cfg_hud["instr_anchor_y"], 
+            anchor_x=cfg_hud["instr_anchor_x"], 
+            parent=self.canvas.scene
+        )
+        
+        self.console_bg = scene.visuals.Rectangle(
+            center=(cfg_hud["console_bg_left_offset"] * scale + (cfg_hud["console_bg_min_width"] * scale) / 2.0, cfg_hud["console_bg_center_y"] * scale), 
+            width=cfg_hud["console_bg_min_width"] * scale, 
+            height=cfg_hud["console_bg_height"] * scale, 
+            radius=cfg_hud["console_bg_radius"] * scale,
+            color=(0.95, 0.95, 0.95, 0.95), 
+            border_color='black', 
+            parent=self.canvas.scene
+        )
         self.console_bg.visible = False
-        self.console_text = scene.visuals.Text(text="", bold=True, font_size=8, color=cfg.TEXT_COLOR, pos=(30, 60), anchor_y='bottom', anchor_x='left', parent=self.canvas.scene)
-        self.zoom_text = scene.visuals.Text(text="", bold=False, font_size=8, color='gray', pos=(self.canvas.size[0] - 10, self.canvas.size[1] - 30), anchor_y='bottom', anchor_x='right', parent=self.canvas.scene)
-        self.hidden_text = scene.visuals.Text(text="", bold=False, font_size=8, color='gray', pos=(self.canvas.size[0] - 10, self.canvas.size[1] - 30), anchor_y='bottom', anchor_x='right', parent=self.canvas.scene)
+        
+        self.console_text = scene.visuals.Text(
+            text="", 
+            bold=True, 
+            font_size=8, 
+            color=cfg.TEXT_COLOR, 
+            pos=(cfg_hud["console_text_x"], cfg_hud["console_text_y"]), 
+            anchor_y=cfg_hud["console_text_anchor_y"], 
+            anchor_x=cfg_hud["console_text_anchor_x"], 
+            parent=self.canvas.scene
+        )
+        
+        self.zoom_text = scene.visuals.Text(
+            text="", 
+            bold=False, 
+            font_size=8, 
+            color='gray', 
+            pos=(self.canvas.size[0] - cfg_hud["zoom_x_offset"], self.canvas.size[1] - cfg_hud["zoom_y_offset"]), 
+            anchor_y=cfg_hud["zoom_anchor_y"], 
+            anchor_x=cfg_hud["zoom_anchor_x"], 
+            parent=self.canvas.scene
+        )
+        
+        self.hidden_text = scene.visuals.Text(
+            text="", 
+            bold=False, 
+            font_size=8, 
+            color='gray', 
+            pos=(self.canvas.size[0] - cfg_hud["hidden_x_offset"], self.canvas.size[1] - cfg_hud["hidden_y_offset"]), 
+            anchor_y=cfg_hud["hidden_anchor_y"], 
+            anchor_x=cfg_hud["hidden_anchor_x"], 
+            parent=self.canvas.scene
+        )
 
     def process_command(self, cmd_str, record_history=True):
         cmd_str = cmd_str.strip()
@@ -950,16 +1109,20 @@ class MainViewer:
             
             if hasattr(module, 'run'):
                 self.console_text.text = f"Running {command_name}..."
+                self.update_console_background()
                 if hasattr(app, 'process_events'):
                     app.process_events() 
                 module.run(self, args)
             else:
                 self.console_text.text = f"Error: No 'run' in {command_name}"
+                self.update_console_background()
                 
         except ModuleNotFoundError:
             self.console_text.text = f"Unknown command: {command_name}"
+            self.update_console_background()
         except Exception as e:
             self.console_text.text = f"Error: {e}"
+            self.update_console_background()
             print(f"Command Error: {e}")
             import traceback
             traceback.print_exc()
@@ -1230,13 +1393,13 @@ class MainViewer:
     
     def _update_hud_elements(self, event=None):
         """Updates the zoom indicator, hidden nodes count, and maintains the tooltip pixel gap."""
+        cfg_hud = self.hud_layout
+        
         # 1. Update Zoom Indicator (Visible World Width)
         if hasattr(self, 'zoom_text'):
             visible_width = self.view.camera.rect.width
             self.zoom_text.text = f"View Width: {visible_width:.1f}"
-            
-            # ---> INCREASED GAP for High DPI Displays (-70 instead of -45)
-            self.zoom_text.pos = (self.canvas.size[0] - 10, self.canvas.size[1] - 55) 
+            self.zoom_text.pos = (self.canvas.size[0] - cfg_hud["zoom_x_offset"], self.canvas.size[1] - cfg_hud["zoom_y_offset"]) 
 
         # 2. Update Hidden Nodes Indicator
         if hasattr(self, 'hidden_text') and hasattr(self, 'visible_mask'):
@@ -1246,9 +1409,7 @@ class MainViewer:
                 self.hidden_text.color = 'red'
             else:
                 self.hidden_text.color = 'gray'
-                
-            # ---> Keep hidden text anchored at the bottom
-            self.hidden_text.pos = (self.canvas.size[0] - 10, self.canvas.size[1] - 30)
+            self.hidden_text.pos = (self.canvas.size[0] - cfg_hud["hidden_x_offset"], self.canvas.size[1] - cfg_hud["hidden_y_offset"])
 
         # 3. Update Tooltip Distance
         if getattr(self, 'selected_node_idx', None) is not None and getattr(self, 'tooltip', None) and self.tooltip.text != "":
