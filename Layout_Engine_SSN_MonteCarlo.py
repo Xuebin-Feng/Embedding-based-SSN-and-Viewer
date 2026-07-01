@@ -10,9 +10,16 @@ except ImportError:
 
 try:
     import torch
-    from utilities import Hardware_Utils
+    try:
+        from utilities import Hardware_Utils
+    except ImportError:
+        import Hardware_Utils
     HAS_TORCH = True
-except Exception:
+except Exception as e:
+    import traceback
+    print("Warning: PyTorch or Hardware_Utils could not be imported. GPU acceleration will be disabled.")
+    print(f"Detail: {e}")
+    traceback.print_exc()
     HAS_TORCH = False
 
 # --- SGLD / Monte Carlo Parameters (Defaults defined here as requested) ---
@@ -448,6 +455,17 @@ def calculate_layout(connectivity, n_nodes, params):
     """
     Main layout generation pipeline using Monte Carlo SGLD.
     """
+    # Determine execution device
+    use_gpu = False
+    device_name = "CPU"
+    if HAS_TORCH:
+        device = Hardware_Utils.get_optimal_device()
+        if device.type != "cpu":
+            use_gpu = True
+            device_name = f"GPU ({device})"
+            
+    print(f"Running layout calculation on {device_name}")
+    
     edges = connectivity[:, :2].astype(np.int32)
     edge_scores = connectivity[:, 2]
     
@@ -628,7 +646,7 @@ def calculate_layout(connectivity, n_nodes, params):
             else:
                 local_edges = np.zeros((0, 2), dtype=np.int32)
                 
-            if HAS_TORCH and torch.cuda.is_available():
+            if use_gpu:
                 sim = SSNSimulationGPU(batch_pos, local_edges, batch_comp_labels, batch_box_limit, batch_params)
             else:
                 sim = SSNSimulationCPU(batch_pos, local_edges, batch_comp_labels, batch_box_limit, batch_params)
