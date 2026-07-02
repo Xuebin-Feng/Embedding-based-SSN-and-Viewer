@@ -4,6 +4,8 @@ import os
 import ast
 import json
 import subprocess
+import markdown
+import re
 
 MAX_CORES = os.cpu_count() or 16
 
@@ -13,6 +15,7 @@ os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_MAC_WANTS_LIGHT_THEME"] = "1"
 
 
+
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTabWidget, QFormLayout, QLineEdit, 
                              QPushButton, QMessageBox, QLabel, QScrollArea, QTextEdit,
@@ -20,24 +23,168 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSpinBox, QFileDialog, QStyle, QStyleOptionSlider)
 from PyQt6.QtCore import Qt
 
-class ResponsiveTextBrowser(QTextBrowser):
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEnginePage
+from PyQt6.QtGui import QColor
+
+class ResponsiveTextBrowser(QWebEngineView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.document().setDocumentMargin(40.0)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.document().setDocumentMargin(40.0)
+        self.setZoomFactor(1.0)
+        # Set a white background on the widget itself to prevent black flash during Chromium init
+        self.setStyleSheet("background-color: #ffffff;")
+        self.page().setBackgroundColor(QColor(255, 255, 255))
+        # Warm up the Chromium renderer with a blank white page
+        super().setHtml("<html><body style='background:#fff'></body></html>")
         
-        # We want the content area width (excluding margins) to be at least 600px
-        # Margins are 40px left + 40px right = 80px, so minimum document width is 680px
-        min_doc_width = 680.0
-        viewport_width = float(self.viewport().width())
+    def setReadOnly(self, read_only):
+        pass
         
-        if viewport_width < min_doc_width:
-            self.document().setTextWidth(min_doc_width)
+    def font(self):
+        from PyQt6.QtGui import QFont
+        return QFont()
+        
+    def setFont(self, font):
+        pass
+        
+    def setHtml(self, html_content, baseUrl=None):
+        github_style = """
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            font-size: 13.5px;
+            line-height: 1.5;
+            color: #24292e;
+            background-color: #ffffff;
+            padding: 24px;
+            max-width: 800px;
+            min-width: 600px;
+            margin: 0 auto;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+            color: #1f2328;
+        }
+        h1 {
+            font-size: 1.8em;
+            padding-bottom: 0.3em;
+            border-bottom: 1px solid #d0d7de;
+        }
+        h2 {
+            font-size: 1.4em;
+            padding-bottom: 0.3em;
+            border-bottom: 1px solid #d0d7de;
+        }
+        h3 {
+            font-size: 1.15em;
+        }
+        p, ul, ol {
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+        li {
+            margin-top: 0.25em;
+        }
+        code {
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 85%;
+            background-color: #f6f8fa;
+            padding: 2px 4px;
+            border-radius: 4px;
+            color: #1f2328;
+        }
+        pre {
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 85%;
+            padding: 16px;
+            line-height: 1.45;
+            background-color: #f6f8fa;
+            border-radius: 6px;
+            border: 1px solid #d0d7de;
+            margin-bottom: 16px;
+            overflow: auto;
+        }
+        pre code {
+            padding: 0;
+            background-color: transparent;
+        }
+        table {
+            border-collapse: collapse;
+            border: 1px solid #d0d7de;
+            width: 100%;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+        table th {
+            font-weight: 600;
+            background-color: #f6f8fa;
+            border: 1px solid #d0d7de;
+            padding: 6px 10px;
+            text-align: left;
+        }
+        table td {
+            border: 1px solid #d0d7de;
+            padding: 6px 10px;
+            text-align: left;
+        }
+        details {
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-top: 15px;
+            margin-bottom: 15px;
+            background-color: #f6f8fa;
+        }
+        summary {
+            font-weight: bold;
+            font-size: 110%;
+            cursor: pointer;
+            color: #0969da;
+            outline: none;
+        }
+        details[open] {
+            background-color: #ffffff;
+        }
+        details[open] summary {
+            border-bottom: 1px solid #d0d7de;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+        """
+        
+        full_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                {github_style}
+            </style>
+            <!-- Load KaTeX math rendering -->
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" 
+                    onload="renderMathInElement(document.body, {{
+                        delimiters: [
+                            {{left: '$$', right: '$$', display: true}},
+                            {{left: '$', right: '$', display: false}},
+                            {{left: '\\\\(', right: '\\\\)', display: false}},
+                            {{left: '\\\\[', right: '\\\\]', display: true}}
+                        ],
+                        throwOnError : false
+                    }});"></script>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
+        if baseUrl:
+            super().setHtml(full_html, baseUrl)
         else:
-            self.document().setTextWidth(viewport_width)
+            super().setHtml(full_html)
 
 class NoScrollComboBox(QComboBox):
     def __init__(self, *args, **kwargs):
@@ -118,6 +265,41 @@ class DynamicComboBox(QComboBox):
     def showPopup(self):
         self.populate()
         super().showPopup()
+
+def render_markdown_with_math(text):
+    # Temporarily hide display math ($$ ... $$) and inline math ($ ... $) from the markdown parser
+    block_math = []
+    inline_math = []
+    
+    # Replace display math
+    def block_repl(match):
+        placeholder = f"<!--BLOCK_MATH_{len(block_math)}-->"
+        block_math.append(match.group(0))
+        return placeholder
+    
+    # We use re.DOTALL to handle multi-line display math blocks
+    text = re.sub(r"\$\$(.*?)\$\$", block_repl, text, flags=re.DOTALL)
+    
+    # Replace inline math
+    def inline_repl(match):
+        placeholder = f"<!--INLINE_MATH_{len(inline_math)}-->"
+        inline_math.append(match.group(0))
+        return placeholder
+        
+    text = re.sub(r"(?<!\\)\$(?!\$)(.*?)(?<!\\)\$", inline_repl, text)
+    
+    # Compile markdown to HTML
+    html = markdown.markdown(text, extensions=['tables', 'fenced_code', 'md_in_html'])
+    
+    # Restore inline math
+    for i, math_str in enumerate(inline_math):
+        html = html.replace(f"<!--INLINE_MATH_{i}-->", math_str)
+        
+    # Restore display math
+    for i, math_str in enumerate(block_math):
+        html = html.replace(f"<!--BLOCK_MATH_{i}-->", math_str)
+        
+    return html
 
 class ToolsGUI(QMainWindow):
     def __init__(self):
@@ -965,7 +1147,8 @@ class ToolsGUI(QMainWindow):
         
         self.desc_title = QLabel("Script Description")
         self.desc_title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 5px;")
-        self.right_panel.addWidget(self.desc_title)
+        self.desc_title.setFixedHeight(25)
+        self.right_panel.addWidget(self.desc_title, 0)
         
         self.script_desc_text = ResponsiveTextBrowser()
         self.script_desc_text.setReadOnly(True)
@@ -973,7 +1156,7 @@ class ToolsGUI(QMainWindow):
         font = self.script_desc_text.font()
         font.setPointSize(10)
         self.script_desc_text.setFont(font)
-        self.right_panel.addWidget(self.script_desc_text)
+        self.right_panel.addWidget(self.script_desc_text, 1)
         
         self.script_data = {} 
         self.tab_paths = [] 
@@ -1139,75 +1322,59 @@ class ToolsGUI(QMainWindow):
         if index >= 0 and index < len(self.tab_paths):
             path = self.tab_paths[index]
             if path == "DIRECTORIES_TAB":
-                dir_html = (
-                    "<html><head><style>"
-                    "  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 1em; }"
-                    "  h2 { color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 1.3em; margin-top: 0; margin-bottom: 1.5em; }"
-                    "  p { margin-top: 0; margin-bottom: 3.6em; }"
-                    "</style></head><body>"
-                    "<h2>📂 Global Directory Settings</h2>"
-                    "<p>Define paths to folders used globally across the SSN Utilities scripts. "
-                    "These configurations are automatically saved, validated, and loaded at runtime by all scripts.</p>"
-                    "</body></html>"
+                dir_md = (
+                    "## 📂 Global Directory Settings\n\n"
+                    "Define paths to folders used globally across the SSN Utilities scripts. "
+                    "These configurations are automatically saved, validated, and loaded at runtime by all scripts."
                 )
+                dir_html = render_markdown_with_math(dir_md)
+                dir_html = dir_html.replace("<table>", '<table border="1" cellpadding="6" style="border-collapse: collapse;">')
                 self.script_desc_text.setHtml(dir_html)
                 return
                 
             # Get the exact name of the current tab
             tab_name = self.tabs.tabText(index)
             
-            # Formulate the target HTML file paths (checking both exact match and underscore match)
-            html_name = f"{tab_name}.html"
-            alt_html_name = f"{tab_name.replace(' ', '_')}.html"
+            # Formulate the target Markdown file paths (checking both exact match and underscore match)
+            md_name = f"{tab_name}.md"
+            alt_md_name = f"{tab_name.replace(' ', '_')}.md"
             
-            html_path = os.path.join("utilities", "Descriptions", html_name)
-            alt_html_path = os.path.join("utilities", "Descriptions", alt_html_name)
+            md_path = os.path.join("docs", "utility_descriptions", md_name)
+            alt_md_path = os.path.join("docs", "utility_descriptions", alt_md_name)
             
-            html_content = ""
+            markdown_content = ""
             
-            # 1. Try to load the exact HTML file
-            if os.path.exists(html_path):
-                with open(html_path, "r", encoding="utf-8") as f:
-                    html_content = f.read()
+            # 1. Try to load the exact Markdown file
+            if os.path.exists(md_path):
+                with open(md_path, "r", encoding="utf-8") as f:
+                    markdown_content = f.read()
             # 2. Try the underscore version if the exact one fails
-            elif os.path.exists(alt_html_path):
-                with open(alt_html_path, "r", encoding="utf-8") as f:
-                    html_content = f.read()
+            elif os.path.exists(alt_md_path):
+                with open(alt_md_path, "r", encoding="utf-8") as f:
+                    markdown_content = f.read()
             
-            # 3. Fallback to the Python script's internal docstring if no HTML file exists
-            if not html_content.strip():
+            # 3. Fallback to the Python script's internal docstring if no MD file exists
+            if not markdown_content.strip():
                 s_data = self.script_data.get(path, {})
                 docstring = s_data.get('docstring', '')
                 
                 if docstring.strip():
-                    # Wrap raw Python docstring in clean HTML with monospace code style
-                    html_content = (
-                        f"<html><head><style>"
-                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 1em; }}"
-                        f"  h2 {{ color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 1.3em; margin-top: 0; margin-bottom: 1.5em; }}"
-                        f"  pre {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 6px; white-space: pre-wrap; font-size: 0.9em; margin-bottom: 3.6em; }}"
-                        f"</style></head><body>"
-                        f"<h2>📄 Internal Documentation</h2>"
-                        f"<pre>{docstring.strip()}</pre>"
-                        f"</body></html>"
+                    markdown_content = (
+                        f"## 📄 Internal Documentation\n\n"
+                        f"```text\n{docstring.strip()}\n```"
                     )
                 else:
                     # Final placeholder if absolutely nothing is found
-                    html_content = (
-                        f"<html><head><style>"
-                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 1em; }}"
-                        f"  h2 {{ color: #ef4444; border-bottom: 2px solid #ef4444; padding-bottom: 5px; font-size: 1.3em; margin-top: 0; margin-bottom: 1.5em; }}"
-                        f"  p {{ margin-top: 0; margin-bottom: 3.6em; }}"
-                        f"  code {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 0.85em; }}"
-                        f"</style></head><body>"
-                        f"<h2>⚠️ Documentation Missing</h2>"
-                        f"<p>No documentation file found for this tab.</p>"
-                        f"<p>To add one, create an HTML document at:<br>"
-                        f"<code>utilities\\Descriptions\\{html_name}</code></p>"
-                        f"</body></html>"
+                    markdown_content = (
+                        f"## ⚠️ Documentation Missing\n\n"
+                        f"No documentation file found for this tab.\n\n"
+                        f"To add one, create a Markdown document at:\n\n"
+                        f"`docs\\utility_descriptions\\{md_name}`"
                     )
             
-            self.script_desc_text.setHtml(html_content.strip())
+            html_content = render_markdown_with_math(markdown_content.strip())
+            html_content = html_content.replace("<table>", '<table border="1" cellpadding="6" style="border-collapse: collapse;">')
+            self.script_desc_text.setHtml(html_content)
             
     def _populate_script_layout(self, layout, script_name, script_path, script_settings_def, source, tree):
         defined_vars = {item["var_name"]: item for item in script_settings_def}

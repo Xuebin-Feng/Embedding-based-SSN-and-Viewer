@@ -108,9 +108,13 @@ Sequence_Similarity_Network_Viewer/
 ├── Command_Engine.py        # Pipeline execution coordinator
 ├── Detect_GPU.py            # GPU hardware check script
 │
-├── Layout_Engine_UMAP.py                    # Coordinates projection using UMAP on ESM embeddings
-├── Layout_Engine_SSN_MonteCarlo.py          # Energy minimization layout solver
-├── Layout_Engine_SSN_MolecularDynamics.py   # Force-directed spring-electrical layout solver
+├── commands/                # Command modules for interactive viewer console
+├── docs/                    # Documentation screenshots, demonstration GIFs, and descriptions
+│   ├── assets/              # UI screenshots and demonstration animated GIFs
+│   └── utility_descriptions/# Markdown files containing detailed utility descriptions
+│
+├── utilities/               # Underlying processing and pipeline scripts
+├── VR_Viewer/               # VR-specific configuration, scripts, and Unity Application
 │
 ├── Input_Files/             # Put your raw input sequence FASTA files here
 ├── Embeddings/              # Directory where ESM protein embeddings are cached
