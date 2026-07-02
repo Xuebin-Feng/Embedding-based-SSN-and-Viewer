@@ -727,7 +727,7 @@ if __name__ == "__main__":
             target_lay = QHBoxLayout(target_container)
             target_lay.setContentsMargins(0, 0, 0, 0)
 
-            self.cb_cache_file = QComboBox()
+            self.cb_cache_file = NoScrollComboBox()
             self.cb_cache_file.setEnabled(False)
             
             self.btn_open_target_folder = QPushButton("📂")

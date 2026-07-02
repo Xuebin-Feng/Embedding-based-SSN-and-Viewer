@@ -1141,8 +1141,8 @@ class ToolsGUI(QMainWindow):
             if path == "DIRECTORIES_TAB":
                 dir_html = (
                     "<html><head><style>"
-                    "  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 14px; }"
-                    "  h2 { color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 18px; margin-top: 0; margin-bottom: 1.5em; }"
+                    "  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 1em; }"
+                    "  h2 { color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 1.3em; margin-top: 0; margin-bottom: 1.5em; }"
                     "  p { margin-top: 0; margin-bottom: 3.6em; }"
                     "</style></head><body>"
                     "<h2>📂 Global Directory Settings</h2>"
@@ -1183,9 +1183,9 @@ class ToolsGUI(QMainWindow):
                     # Wrap raw Python docstring in clean HTML with monospace code style
                     html_content = (
                         f"<html><head><style>"
-                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 14px; }}"
-                        f"  h2 {{ color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 18px; margin-top: 0; margin-bottom: 1.5em; }}"
-                        f"  pre {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 6px; white-space: pre-wrap; font-size: 13px; margin-bottom: 3.6em; }}"
+                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 1em; }}"
+                        f"  h2 {{ color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 5px; font-size: 1.3em; margin-top: 0; margin-bottom: 1.5em; }}"
+                        f"  pre {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 6px; white-space: pre-wrap; font-size: 0.9em; margin-bottom: 3.6em; }}"
                         f"</style></head><body>"
                         f"<h2>📄 Internal Documentation</h2>"
                         f"<pre>{docstring.strip()}</pre>"
@@ -1195,10 +1195,10 @@ class ToolsGUI(QMainWindow):
                     # Final placeholder if absolutely nothing is found
                     html_content = (
                         f"<html><head><style>"
-                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 14px; }}"
-                        f"  h2 {{ color: #ef4444; border-bottom: 2px solid #ef4444; padding-bottom: 5px; font-size: 18px; margin-top: 0; margin-bottom: 1.5em; }}"
+                        f"  body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background-color: #ffffff; line-height: 1.2; font-size: 1em; }}"
+                        f"  h2 {{ color: #ef4444; border-bottom: 2px solid #ef4444; padding-bottom: 5px; font-size: 1.3em; margin-top: 0; margin-bottom: 1.5em; }}"
                         f"  p {{ margin-top: 0; margin-bottom: 3.6em; }}"
-                        f"  code {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 12px; }}"
+                        f"  code {{ font-family: ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 0.85em; }}"
                         f"</style></head><body>"
                         f"<h2>⚠️ Documentation Missing</h2>"
                         f"<p>No documentation file found for this tab.</p>"

@@ -6,24 +6,50 @@
 [![Framework PyQt6](https://img.shields.io/badge/UI-PyQt6-orange.svg)](https://www.riverbankcomputing.com/software/pyqt/)
 [![Render VisPy](https://img.shields.io/badge/Render-VisPy-red.svg)](https://vispy.org/)
 
-The **Embedding-based SSN Viewer** is an interactive, high-performance graphical application designed to streamline the generation, visualization, and analysis of both traditional and embedding-based Sequence Similarity Networks (SSNs). By integrating **Multiple Sequence Alignments (MSAs)** directly into network exploration, the viewer bridges macroscopic sequence relationships with microscopic residue-level conservation, providing a comprehensive, multi-scale view of the protein sequence space.
+The **Embedding-based SSN Viewer (name: TBD)** is an interactive, high-performance graphical application designed to streamline the generation, visualization, and analysis of both traditional and embedding-based Sequence Similarity Networks (SSNs). By integrating **Multiple Sequence Alignments (MSAs)** directly into network exploration, the viewer bridges macroscopic sequence relationships with microscopic residue-level conservation, providing a comprehensive, multi-scale view of the protein sequence space.
 
 ---
-
 ## ⚠️ Important Note
 
-1. **Cross-Platform Support**: Linux & macOS support is currently under active development and in progress.
-2. **Work in Progress**: This documentation and project structure are still updating.
-3. **Recommended Hardware**: An **NVIDIA GPU** is highly recommended for CUDA acceleration of embeddings and layout solvers.
+1. **Cross-Platform Support**: Linux & macOS support is currently under active development.
+2. **Work in Progress**: This documentation and the repository structure are undergoing active updates.
+3. **Recommended Hardware**: An **NVIDIA GPU** is highly recommended for CUDA acceleration of embeddings and layout solvers. Intel Arc, AMD, and Apple Silicon GPUs are also supported via standard hardware acceleration backends.
 
 ---
 
-## 📸 Preview
+## 📸 Overview
 
-*Insert an animated GIF or video here showing the interactive PyQt6 viewport in action, displaying node selections, zooming, and color mappings.*
-```markdown
+The application streamlines the entire SSN pipeline—from generation to interactive analysis—within a single unified workflow. It supports both traditional sequence similarity methods (e.g., BLAST) and modern embedding-based language model algorithms. Beyond dynamic visual formatting, the viewer provides an interactive command console with specialized commands tailored for deep analysis of the protein sequence space (see `list_of_commands.docx` for a detailed command reference).
+
 ![SSN Viewer UI Demonstration](docs/assets/ssn_viewer_demo.gif)
-```
+
+---
+## 🖥️ Graphical User Interface
+
+### 🛠️ SSN Tools GUI
+
+All calculations related to SSN generation are centralized in the `SSN_Tools.py` GUI. The interface is organized into intuitive tabs, each representing a distinct stage of the pipeline. It includes interactive tooltips at the bottom for parameter input fields and a script description panel on the right highlighting the function of each processing script.
+
+![SSN Tools GUI](docs/assets/ssn_tools_gui.png)
+
+### ⚙️ SSN Configuration GUI
+
+The configuration GUI in `SSN_Config.py` simplifies input file selection and parameter tuning for SSN generation. It features a **Compute Network Statistics** utility that analyzes the network density and outputs a report in the right panel to guide the selection of an optimal similarity cutoff. Additionally, the **Consistency Check** utility compares the similarity network against the Multiple Sequence Alignment (MSA) to ensure sequence headers and indexes match perfectly across all files.
+
+![SSN Configuration GUI](docs/assets/ssn_config_gui.png)
+
+### 🔍 SSN Viewer GUI
+
+The main visualization window, `SSN_Viewer.py`, serves as the interactive core for network exploration, formatting, and analysis. It provides full mouse and keyboard controls for 3D navigation and graphic customization, along with an in-line command console (HUD) to execute analytical operations, highlight specific residues, select clusters, and export figures.
+
+![SSN Viewer GUI](docs/assets/ssn_viewer_gui.png)
+
+---
+## 🧬 System Workflow
+
+The pipeline supports two primary pathways for Sequence Similarity Network (SSN) generation: a **traditional pathway** utilizing sequence alignment algorithms (like BLAST) and an **embedding-based pathway** driven by protein language models. Additionally, users can project sequences into 2D/3D space using UMAP based on pre-calculated embedding representations.
+
+![System Workflow](docs/assets/work_flow.png)
 
 ---
 
@@ -31,73 +57,60 @@ The **Embedding-based SSN Viewer** is an interactive, high-performance graphical
 
 *Work in Progress*
 
----
-
-## 🧬 System Workflow
-
-*Work in Progress*
+*   **Embedding-Based Dynamic Programming Alignment**: Align sequences using high-dimensional dense embedding similarity vectors instead of simple substitution matrices (BLOSUM/PAM), resolving structural and functional relationships even at low sequence identity.
+*   **High-Performance Visualization**: Powered by PyQt6 and VisPy, allowing real-time rendering, rotation, zooming, and manipulation of large networks containing thousands of nodes and edges.
+*   **Integrated Command Console (HUD)**: Execute analytical commands (such as `zoom`, `select`, `color`, `cluster`, `subcluster`, and `logo`) directly inside the viewer viewport for instant formatting and analysis.
+*   **Integrated Multiple Sequence Alignments (MSA)**: Bridge macroscopic network topology with residue-level conservation. Map conservation scores directly onto nodes and extract consensus sequence details interactively.
+*   **Comprehensive Utilities Suite**: Centralized GUI in `SSN_Tools.py` supporting sequence sanitization, embedding generation (ESM, ProtBERT, ProstT5), network edge filtering, guide-tree MSA generation, and sequence extraction/injection.
+*   **Cross-Platform Hardware Acceleration**: Automatic detection and utilization of CUDA (NVIDIA), Apple Silicon, Intel Arc, or AMD GPUs to accelerate embedding generation and force-directed layouts.
 
 ---
 
 ## ⚙️ Installation Steps
-
-
 
 1. **Clone the repository:**
    Download or clone the repository to your computer.
 
 2. **Set up the environment:**
 
-   **Windows**:
-   Double-click `SSN_Tools.bat` or `SSN_Viewer.bat`. A self-contained virtual Python environment will be created at the project root automatically.
+   **🪟 Windows**:
+   Double-click `SSN_Tools.bat` or `SSN_Viewer.bat`. A self-contained virtual Python environment will be created at the project root.
 
-   **Linux/macOS (In Progress)**:
+   **🐧 Linux & 🍏 macOS (Adaptation in Progress)**:
    Open your terminal and run the following:
      
-   1. Navigate to the project directory:
+   Navigate to the project directory:
    ```bash
    cd Sequence_Similarity_Network_Viewer
    ```
-     
-   2. Grant execution permissions to the `.sh` script files:
+   Grant execution permissions to the `.sh` script files:
    ```bash
    chmod +x *.sh
    ```
-     
-   3. Execute the tools script to initialize the virtual environment and install dependencies:
+   Execute the tools script to initialize the virtual environment and install dependencies:
    ```bash
    ./SSN_Tools.sh
    ```
 
 ---
 
-## 💻 Usage
-
-*Work in Progress*
-
----
-
-## 📂 Repository Structure
+## 📂 File Structure
 
 ```directory
 Sequence_Similarity_Network_Viewer/
 │
 ├── SSN_Viewer.py            # Main PyQt6 / VisPy desktop visualization application
-├── SSN_Tools.py             # CLI utility for generating network data & computing layouts
-├── SSN_Config.py            # Central configuration file for thresholds, colors, and models
+├── SSN_Tools.py             # GUI & CLI utility for generating network data & computing layouts
+├── SSN_Config.py            # GUI configuration manager for inputs, thresholds, and models
 ├── SSN_Utils.py             # Shared utility functions (IO, math helper, parsing)
 │
 ├── Alignment_Manager.py     # Pairwise and multiple sequence alignment runner
 ├── Command_Engine.py        # Pipeline execution coordinator
 ├── Detect_GPU.py            # GPU hardware check script
 │
-├── Layout_Engine_UMAP.py             # Coordinates projection using UMAP on ESM embeddings
-├── Layout_Engine_SSN_MonteCarlo.py   # Energy minimization layout solver
-├── Layout_Engine_SSN_MolecularDynamics.py # Force-directed spring-electrical layout solver
-│
-├── VR_Viewer (work in progress)/     # VR-specific configuration, scripts, and Unity Application
-│   ├── SSN_VR_Viewer.py     # Python runner coordinating network streams to VR
-│   └── VR_App/              # Precompiled Unity executable for VR headsets
+├── Layout_Engine_UMAP.py                    # Coordinates projection using UMAP on ESM embeddings
+├── Layout_Engine_SSN_MonteCarlo.py          # Energy minimization layout solver
+├── Layout_Engine_SSN_MolecularDynamics.py   # Force-directed spring-electrical layout solver
 │
 ├── Input_Files/             # Put your raw input sequence FASTA files here
 ├── Embeddings/              # Directory where ESM protein embeddings are cached
@@ -108,7 +121,7 @@ Sequence_Similarity_Network_Viewer/
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to open Issues or submit Pull Requests to enhance layout performance, UI responsiveness, or VR interactions.
+Contributions are welcome! Please feel free to open Issues or submit Pull Requests to enhance computational efficiency, layout performance, UI responsiveness, or commands for analyses.
 
 ## 📄 License
 
