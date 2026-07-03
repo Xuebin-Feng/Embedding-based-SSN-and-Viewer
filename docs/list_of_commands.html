@@ -1,0 +1,1700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sequence Similarity Network (SSN) Viewer Command Reference</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Light theme (default) */
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-sidebar: #ffffff;
+            --bg-code: #f1f5f9;
+            --bg-code-inner: #f8fafc;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --accent: #4f46e5;
+            --accent-glow: rgba(79, 70, 229, 0.1);
+            --border: #e2e8f0;
+            --border-hover: #cbd5e1;
+            --syntax-cmd: #0f172a;
+            --syntax-param: #0891b2;
+            --syntax-expr: #b45309;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+            --shadow-md: 0 10px 15px -3px rgb(0 0 0 / 0.05), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+            --badge-core-bg: #dbeafe;
+            --badge-core-text: #1e40af;
+            --badge-new-bg: #dcfce7;
+            --badge-new-text: #166534;
+            --badge-ext-bg: #f3e8ff;
+            --badge-ext-text: #6b21a8;
+            --badge-util-bg: #fef3c7;
+            --badge-util-text: #92400e;
+        }
+
+        [data-theme="dark"] {
+            /* Dark theme */
+            --bg-primary: #0b0f19;
+            --bg-secondary: #111827;
+            --bg-sidebar: #111827;
+            --bg-code: #1f2937;
+            --bg-code-inner: #111827;
+            --text-primary: #f9fafb;
+            --text-secondary: #d1d5db;
+            --text-muted: #9ca3af;
+            --accent: #818cf8;
+            --accent-glow: rgba(129, 140, 248, 0.15);
+            --border: #374151;
+            --border-hover: #4b5563;
+            --syntax-cmd: #f9fafb;
+            --syntax-param: #22d3ee;
+            --syntax-expr: #fbbf24;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+            --shadow-md: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+            --badge-core-bg: #1e3a8a;
+            --badge-core-text: #93c5fd;
+            --badge-new-bg: #064e3b;
+            --badge-new-text: #6ee7b7;
+            --badge-ext-bg: #581c87;
+            --badge-ext-text: #d8b4fe;
+            --badge-util-bg: #78350f;
+            --badge-util-text: #fde68a;
+        }
+
+        /* Basic Reset */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            min-height: 100vh;
+            line-height: 1.6;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* Sidebar Styling */
+        aside {
+            width: 320px;
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+            overflow: visible !important;
+            transition: background-color 0.3s ease, border-color 0.3s ease, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+            letter-spacing: -0.025em;
+        }
+
+        .sidebar-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .toggle-sidebar-btn {
+            position: absolute;
+            top: 24px;
+            right: -30px;
+            width: 30px;
+            height: 48px;
+            background-color: var(--bg-sidebar);
+            border: 1px solid var(--border);
+            border-left: none;
+            border-radius: 0 8px 8px 0;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 101;
+            box-shadow: 4px 2px 6px -1px rgb(0 0 0 / 0.05);
+            transition: all 0.2s ease, background-color 0.3s ease, border-color 0.3s ease;
+        }
+
+        .toggle-sidebar-btn:hover {
+            background-color: var(--bg-primary);
+            color: var(--accent);
+            border-color: var(--border-hover);
+        }
+
+        .toggle-sidebar-btn::after {
+            content: "«";
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        body.sidebar-collapsed .toggle-sidebar-btn::after {
+            content: "»";
+        }
+
+        body.sidebar-collapsed aside {
+            transform: translateX(-100%);
+        }
+
+        body.sidebar-collapsed main {
+            margin-left: 0;
+        }
+
+        body.sidebar-collapsed .expand-sidebar-btn {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .search-container {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 14px 10px 36px;
+            font-size: 0.9rem;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: inherit;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-glow);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 36px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .sidebar-menu {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px;
+        }
+
+        .menu-category {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin: 18px 0 8px 0;
+        }
+
+        .menu-category:first-of-type {
+            margin-top: 0;
+        }
+
+        .menu-list {
+            list-style: none;
+        }
+
+        .menu-item a {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: 6px;
+            margin-bottom: 2px;
+            transition: all 0.2s ease;
+        }
+
+        .menu-item a:hover {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .menu-item.active a {
+            background-color: var(--accent-glow);
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .menu-item-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        /* Sidebar Footer Styling */
+        .sidebar-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .theme-toggle-btn {
+            background: none;
+            border: 1px solid var(--border);
+            padding: 8px 12px;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+
+        .theme-toggle-btn:hover {
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+            background-color: var(--bg-primary);
+        }
+
+        /* Main Content Styling */
+        main {
+            margin-left: 320px;
+            flex: 1;
+            padding: 40px 60px;
+            display: flex;
+            justify-content: center;
+            transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .content-wrapper {
+            width: 100%;
+            max-width: 960px;
+        }
+
+        header {
+            margin-bottom: 40px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 24px;
+        }
+
+        h1 {
+            font-size: 2.25rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        /* Document Sections */
+        .section-divider {
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            margin: 48px 0 24px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .section-divider:first-of-type {
+            margin-top: 0;
+        }
+
+        /* Command Cards */
+        .command-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px 30px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
+        }
+
+        .command-card:hover {
+            border-color: var(--border-hover);
+            box-shadow: var(--shadow-md);
+        }
+
+        .command-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .command-card-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .command-card-name {
+            font-family: 'Fira Code', monospace;
+            background-color: var(--bg-code);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 1.2rem;
+            color: var(--accent);
+        }
+
+        .command-card-desc-title {
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        /* Badges */
+        .badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-core { background-color: var(--badge-core-bg); color: var(--badge-core-text); }
+        .badge-new { background-color: var(--badge-new-bg); color: var(--badge-new-text); }
+        .badge-ext { background-color: var(--badge-ext-bg); color: var(--badge-ext-text); }
+        .badge-util { background-color: var(--badge-util-bg); color: var(--badge-util-text); }
+
+        /* Syntax Boxes */
+        .syntax-box {
+            background-color: var(--bg-code);
+            border-left: 4px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 14px 20px;
+            margin: 16px 0;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.9rem;
+            position: relative;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .syntax-content {
+            white-space: pre-wrap;
+            color: var(--syntax-cmd);
+        }
+
+        .copy-btn {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .copy-btn:hover {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        .copy-btn.copied {
+            background-color: var(--badge-new-bg);
+            color: var(--badge-new-text);
+            border-color: transparent;
+        }
+
+        /* Description Elements */
+        p, li {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        p strong {
+            color: var(--text-primary);
+        }
+
+        p code, li code {
+            font-family: 'Fira Code', monospace;
+            background-color: var(--bg-code);
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+        }
+
+        /* Subsections (Arguments, Modes, etc.) */
+        .subheading {
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 20px 0 10px 0;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.05em;
+        }
+
+        ul, ol {
+            margin-left: 20px;
+            margin-bottom: 16px;
+        }
+
+        li {
+            margin-bottom: 6px;
+        }
+
+        /* Callouts / Warnings */
+        .callout {
+            background-color: var(--bg-code);
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin: 16px 0;
+        }
+
+        .callout-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Examples list styling */
+        .example-list {
+            list-style: none;
+            margin-left: 0;
+            margin-top: 10px;
+        }
+
+        .example-item {
+            background-color: var(--bg-code-inner);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 16px;
+            margin-bottom: 8px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Interactive Collapsible / Tab */
+        .collapsible-container {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        .collapsible-header {
+            background-color: var(--bg-code);
+            padding: 12px 20px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+
+        .collapsible-header::after {
+            content: "▼";
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            transition: transform 0.2s ease;
+        }
+
+        .collapsible-container.open .collapsible-header::after {
+            transform: rotate(180deg);
+        }
+
+        .collapsible-content {
+            padding: 16px 20px;
+            background-color: var(--bg-secondary);
+            display: none;
+            border-top: 1px solid var(--border);
+        }
+
+        .collapsible-container.open .collapsible-content {
+            display: block;
+        }
+
+        /* Expression Interpreter Syntax Highlighted Classes */
+        .expr-string { color: var(--syntax-expr); font-weight: 500; }
+        .expr-label { color: var(--accent); font-weight: 500; }
+        .expr-struct { color: var(--syntax-param); font-weight: 500; }
+
+        /* Smooth scroll */
+        html {
+            scroll-behavior: smooth;
+        }
+
+        /* Active highlight styling */
+        .command-card.highlight-card {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        /* Empty state search */
+        .empty-search-state {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        /* Responsive Layout */
+        @media (max-width: 992px) {
+            body {
+                flex-direction: column;
+            }
+            aside {
+                width: 100%;
+                height: auto;
+                position: relative;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+            .sidebar-menu {
+                max-height: 250px;
+            }
+            main {
+                margin-left: 0;
+                padding: 30px 20px;
+            }
+            .toggle-sidebar-btn, .expand-sidebar-btn {
+                display: none !important;
+            }
+            body.sidebar-collapsed aside {
+                transform: none !important;
+            }
+            body.sidebar-collapsed main {
+                margin-left: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <aside>
+        <div class="sidebar-header">
+            <div class="sidebar-title">SSN Command Reference</div>
+            <div class="sidebar-subtitle">Interactive Manual &amp; Setup Guide</div>
+        </div>
+        <div class="search-container">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="search-input" placeholder="Search commands...">
+        </div>
+        <div class="sidebar-menu">
+            <div class="menu-category">Navigation</div>
+            <ul class="menu-list">
+                <li class="menu-item active" data-target="docs-intro"><a href="#docs-intro"><span>Overview &amp; Help</span></a></li>
+            </ul>
+
+            <div class="menu-category">Expression Interpreter</div>
+            <ul class="menu-list">
+                <li class="menu-item" data-target="expr-interpreter"><a href="#expr-interpreter"><span>Syntax Rules</span></a></li>
+                <li class="menu-item" data-target="expr-boolean"><a href="#expr-boolean"><span>Boolean Operators</span></a></li>
+            </ul>
+
+            <div class="menu-category">Core Commands</div>
+            <ul class="menu-list" id="menu-core-cmds">
+                <li class="menu-item" data-target="cmd-zoom"><a href="#cmd-zoom"><span>zoom</span></a></li>
+                <li class="menu-item" data-target="cmd-save"><a href="#cmd-save"><span>save</span></a></li>
+                <li class="menu-item" data-target="cmd-reset"><a href="#cmd-reset"><span>reset</span></a></li>
+                <li class="menu-item" data-target="cmd-hide"><a href="#cmd-hide"><span>hide</span></a></li>
+                <li class="menu-item" data-target="cmd-undoredo"><a href="#cmd-undoredo"><span>undo &amp; redo</span></a></li>
+                <li class="menu-item" data-target="cmd-run"><a href="#cmd-run"><span>run</span> <span class="menu-item-badge badge-new">new</span></a></li>
+            </ul>
+
+            <div class="menu-category">Alignment</div>
+            <ul class="menu-list" id="menu-aln-cmds">
+                <li class="menu-item" data-target="cmd-reference"><a href="#cmd-reference"><span>reference</span></a></li>
+                <li class="menu-item" data-target="cmd-alignment"><a href="#cmd-alignment"><span>alignment</span> <span class="menu-item-badge badge-new">new</span></a></li>
+                <li class="menu-item" data-target="cmd-query"><a href="#cmd-query"><span>query</span></a></li>
+            </ul>
+
+            <div class="menu-category">Analysis</div>
+            <ul class="menu-list" id="menu-analysis-cmds">
+                <li class="menu-item" data-target="cmd-cluster"><a href="#cmd-cluster"><span>cluster</span></a></li>
+                <li class="menu-item" data-target="cmd-subcluster"><a href="#cmd-subcluster"><span>subcluster</span> <span class="menu-item-badge badge-new">new</span></a></li>
+                <li class="menu-item" data-target="cmd-color"><a href="#cmd-color"><span>color</span></a></li>
+                <li class="menu-item" data-target="cmd-group"><a href="#cmd-group"><span>group</span></a></li>
+                <li class="menu-item" data-target="cmd-select"><a href="#cmd-select"><span>select</span></a></li>
+                <li class="menu-item" data-target="cmd-label"><a href="#cmd-label"><span>label</span></a></li>
+                <li class="menu-item" data-target="cmd-export"><a href="#cmd-export"><span>export</span></a></li>
+            </ul>
+
+            <div class="menu-category">Meta Data</div>
+            <ul class="menu-list" id="menu-meta-cmds">
+                <li class="menu-item" data-target="cmd-meta"><a href="#cmd-meta"><span>meta</span> <span class="menu-item-badge badge-new">new</span></a></li>
+                <li class="menu-item" data-target="cmd-spectrum"><a href="#cmd-spectrum"><span>spectrum</span> <span class="menu-item-badge badge-new">new</span></a></li>
+            </ul>
+
+            <div class="menu-category">Graphics</div>
+            <ul class="menu-list" id="menu-graphics-cmds">
+                <li class="menu-item" data-target="cmd-print"><a href="#cmd-print"><span>print</span></a></li>
+                <li class="menu-item" data-target="cmd-logo"><a href="#cmd-logo"><span>logo</span></a></li>
+            </ul>
+        </div>
+        <div class="sidebar-footer">
+            <button class="theme-toggle-btn" id="theme-toggle-btn">
+                <span id="theme-icon">🌙</span>
+                <span id="theme-text">Dark Mode</span>
+            </button>
+        </div>
+        <button class="toggle-sidebar-btn" id="toggle-sidebar-btn" title="Toggle Sidebar"></button>
+    </aside>
+
+    <main>
+        <div class="content-wrapper">
+            <header id="docs-intro">
+                <h1>Sequence Similarity Network (SSN) Viewer</h1>
+                <div class="subtitle">Command Line Interface (CLI) Manual &amp; Reference Guide</div>
+                <p style="margin-top: 16px; font-size: 1rem; color: var(--text-secondary);">
+                    This reference documents all available visual, physical, and community-clustering commands. Use the sidebar to search or filter commands dynamically. Core commands operate on the visual state in memory, while external scripts execute advanced bioinformatics algorithms and export outputs to the disk.
+                </p>
+            </header>
+
+
+            <div class="section-divider" id="expr-interpreter">Expression Interpreter Syntax Rules</div>
+            <div class="command-card">
+                <p><strong>Overview:</strong> The Common Expression Interpreter is the underlying engine that parses text queries into mathematical selections. It is shared across multiple tools in the SSN software (like <code>color</code>, <code>hide</code>, <code>label</code>, etc.) and allows for highly complex, multi-layered targeting of network nodes.</p>
+                <div class="callout">
+                    <div class="callout-title">⚠️ Important Space Rule</div>
+                    <p>Expressions must be written continuously <strong>without spaces</strong>. Spaces are strictly reserved to separate different commands, parameters, or attributes.</p>
+                </div>
+                
+                <div class="subheading">Targeting Modules</div>
+                <p>The interpreter recognizes six distinct targeting syntaxes:</p>
+                
+                <div class="collapsible-container">
+                    <div class="collapsible-header"><span>1. Text &amp; Wildcard Matching (<span class="expr-string">"Text"</span>)</span></div>
+                    <div class="collapsible-content">
+                        <p>Surrounding text in double quotes searches node FASTA headers.</p>
+                        <ul>
+                            <li><strong>Exact Substring:</strong> <code>"kinase"</code> matches any header containing the word kinase.</li>
+                            <li><strong>Wildcards:</strong> Supports standard glob patterns. <code>"*A5?T*"</code> matches any header containing 'A5', any single character, and 'T'.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="collapsible-container">
+                    <div class="collapsible-header"><span>2. Attribute Labels (<span class="expr-label">#Label#</span>)</span></div>
+                    <div class="collapsible-content">
+                        <p>Surrounding text in hash symbols searches internal network metadata, clusters, and manually assigned groups.</p>
+                        <ul>
+                            <li><strong>Clusters:</strong> <code>#cluster_1#</code>, <code>#cluster_2#</code>, etc.</li>
+                            <li><strong>Noise:</strong> <code>#noise#</code> isolates unclustered/filtered nodes (Cluster -1).</li>
+                            <li><strong>Custom Groups:</strong> <code>#human#</code> matches nodes you have manually grouped and labeled as "human".</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="collapsible-container">
+                    <div class="collapsible-header"><span>3. Sequence Alignment Queries (<span class="expr-struct">[AA][Pos]</span>)</span></div>
+                    <div class="collapsible-content">
+                        <p>Allows targeting based on the Multiple Sequence Alignment (MSA) residue distribution.</p>
+                        <ul>
+                            <li><strong>Specific Amino Acid:</strong> <code>P106</code> targets all nodes that have a Proline (P) at alignment column 106.</li>
+                            <li><strong>Gap Queries:</strong> <code>_100</code> targets all nodes that have a gap (<code>-</code> or <code>.</code>) at alignment column 100.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="collapsible-container">
+                    <div class="collapsible-header"><span>4. External File Cross-Referencing (<code>@Filename@</code>)</span></div>
+                    <div class="collapsible-content">
+                        <p>Surrounding a filename with the <code>@</code> symbol cross-references the network against a text file or FASTA file located in the <code>Header_Lists</code> directory.</p>
+                        <ul>
+                            <li><strong>Direct Match:</strong> <code>@my_targets.txt@</code> checks if the network header matches lines in the file exactly.</li>
+                            <li><strong>NCBI Extraction:</strong> <code>@[NCBI]my_targets.txt@</code> automatically scans the text file for standard NCBI accession codes (e.g., <code>WP_01234.1</code>) and matches the network headers containing those codes, ignoring surrounding text.</li>
+                            <li><strong>PDB Extraction:</strong> <code>@[PDB]my_targets.txt@</code> performs the same extraction but for Protein Data Bank codes (e.g., <code>1XYZ</code>).</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="collapsible-container">
+                    <div class="collapsible-header"><span>5. UI Selection (<code>$sele$</code>)</span></div>
+                    <div class="collapsible-content">
+                        <p>Typing <code>$sele$</code> explicitly passes the nodes you currently have highlighted/selected with your mouse in the viewer.</p>
+                    </div>
+                </div>
+
+                <div class="collapsible-container">
+                    <div class="collapsible-header"><span>6. Metadata Queries (<code>{Key Op Val}</code>)</span></div>
+                    <div class="collapsible-content">
+                        <p>Allows targeting based on custom metadata fields uploaded using Excel or CSV tables.</p>
+                        <ul>
+                            <li><strong>Numerical:</strong> <code>{Length>500}</code> targets nodes where sequence length is greater than 500.</li>
+                            <li><strong>Text:</strong> <code>{Organism=*coli*}</code> targets nodes where Organism metadata contains "coli".</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="section-divider" id="expr-boolean">Boolean Logic Operators</div>
+                <p>You can combine any of the targeting modules above using standard Boolean logic (no spaces allowed):</p>
+                <ul>
+                    <li><strong>&amp; (AND):</strong> <code>"Human"&amp;#cluster_1#</code> (Must be human AND in cluster 1).</li>
+                    <li><strong>| (OR):</strong> <code>P106|A106</code> (Must have either Proline OR Alanine at position 106).</li>
+                    <li><strong>! (NOT):</strong> <code>!#noise#</code> (Must NOT be noise).</li>
+                    <li><strong>^ (XOR):</strong> <code>#cluster_1#^P106</code> (Exclusive OR - either in cluster 1 or has Proline at 106, but not both).</li>
+                    <li><strong>() (Grouping):</strong> Parentheses can be used to enforce order of operations, e.g., <code>!(#cluster_1#|#cluster_2#)</code>.</li>
+                </ul>
+            </div>
+
+<div class="section-divider" id="sec-core">Core Commands</div>
+
+            <section class="command-card" id="cmd-zoom">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">zoom</span>
+                        <span class="command-card-desc-title">&ndash; Precise Camera Control</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">zoom &lt;width&gt;</div>
+                    <button class="copy-btn" onclick="copyText('zoom &lt;width&gt;', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> Set the camera view width to exactly the specified numeric &lt;width&gt;+10% while keeping the current center point of the view intact</p>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>zoom 500</span><button class="copy-btn" onclick="copyText('zoom 500', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-save">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">save</span>
+                        <span class="command-card-desc-title">&ndash; Save Current View to Cache</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">save [filename / filename.h5]</div>
+                    <button class="copy-btn" onclick="copyText('save [filename / filename.h5]', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> Saves the current view to an HDF5 cache file. The cache file is associated with the current layout. If no filename is provided, it automatically generates an incrementing version number (e.g., _ver.01.h5, _ver.02.h5) in the target layout folder to prevent overwriting previous saves.</p>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>save</span><button class="copy-btn" onclick="copyText('save', this)">Copy</button></li>
+                    <li class="example-item"><span>save session_layout.h5</span><button class="copy-btn" onclick="copyText('save session_layout.h5', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-reset">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">reset</span>
+                        <span class="command-card-desc-title">&ndash; Reset Selected View to Initial States</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">reset &lt;target_1&gt; [target_2] ... or &lt;target_1&gt; [target_2] ... reset</div>
+                    <button class="copy-btn" onclick="copyText('reset &lt;target_1&gt; [target_2] ... or &lt;target_1&gt; [target_2] ... reset', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> Reset selected properties to their initial states. Supported targets include:</p>
+                <div class="subheading">Supported Targets</div>
+                <ul>
+                    <li><code>color / colors</code>: Reverts all node colors to the default neighbor color.</li>
+<li><code>size / sizes</code>: Resets all node sizes to the baseline size defined in configuration.</li>
+<li><code>shape / shapes</code>: Resets all nodes back to standard circular &#x27;disc&#x27; shapes.</li>
+<li><code>cluster / clusters</code>: Strips all cluster labels, removes cluster UI visuals, and clears the cluster tooltip data.</li>
+<li><code>group / groups</code>: Clears all custom group label sets assigned to nodes.</li>
+<li><code>hide / hidden</code>: Unhides all hidden nodes by setting the entire visibility mask back to True.</li>
+<li><code>network / networks</code>: Snaps all node positions back to the original starting layout coordinates (or the state loaded from the last .h5 save).</li>
+                </ul>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>reset colors sizes</span><button class="copy-btn" onclick="copyText('reset colors sizes', this)">Copy</button></li>
+                    <li class="example-item"><span>reset network hide</span><button class="copy-btn" onclick="copyText('reset network hide', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-hide">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">hide</span>
+                        <span class="command-card-desc-title">&ndash; Hide Selected Nodes from View</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">hide [expression]</div>
+                    <button class="copy-btn" onclick="copyText('hide', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> hide the currently selected nodes and any edges connecting to them. The number of currently hidden nodes are shown at the bottom right of the screen. Note that the &ldquo;hide&rdquo; command does not really change the layout, meaning that it will not exclude hidden nodes from analyses.</p>
+                <div class="subheading">Arguments &amp; Modes</div>
+                <ul>
+                    <li><strong>Without arguments:</strong> Immediately hides all currently selected nodes and their connected edges.</li>
+                    <li><strong>With <code>single</code> or <code>free</code>:</strong> Hides all visible nodes that have no active edges at the current similarity threshold.</li>
+                    <li><strong>With <code>expression</code>:</strong> Hides all visible nodes matching the logical expression (e.g. <code>hide #noise#</code>).</li>
+                </ul>
+                <div class="callout">
+                    <div class="callout-title">💡 Unhiding Nodes</div>
+                    <p>To unhide nodes and restore full visibility, use the <code>reset hide</code> command.</p>
+                </div>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>hide</span><button class="copy-btn" onclick="copyText('hide', this)">Copy</button></li>
+                    <li class="example-item"><span>hide single</span><button class="copy-btn" onclick="copyText('hide single', this)">Copy</button></li>
+                    <li class="example-item"><span>hide #noise#</span><button class="copy-btn" onclick="copyText('hide #noise#', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-undoredo">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">undo &amp; redo</span>
+                        <span class="command-card-desc-title">&ndash; Session History Navigation</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">undo   |   redo</div>
+                    <button class="copy-btn" onclick="copyText('undo', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> redo and undo last actions. Most commands automatically save visual and physical viewer states to history prior to execution, allowing for instantaneous revert and reload.</p>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>undo</span><button class="copy-btn" onclick="copyText('undo', this)">Copy</button></li>
+                    <li class="example-item"><span>redo</span><button class="copy-btn" onclick="copyText('redo', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-run">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">run</span>
+                        <span class="command-card-desc-title">&ndash; Execute Command Script</span>
+                    </div>
+                    <span class="badge badge-new">New</span>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">run [filename]</div>
+                    <button class="copy-btn" onclick="copyText('run', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> Opens a file explorer to select a command script file (<code>.txt</code> or <code>.py</code>) and executes the commands in sequence.</p>
+                <div class="subheading">Execution Details</div>
+                <ul>
+                    <li><strong>Python Scripts (<code>.py</code>):</strong> Executed in a subprocess using the active python environment. The script's standard output (stdout) is read and executed line-by-line in the viewer.</li>
+                    <li><strong>Text Files (<code>.txt</code>):</strong> Executed line-by-line. Comments starting with double slashes (<code>//</code>) are automatically ignored.</li>
+                    <li><strong>Infinite Loop Protection:</strong> Recursive <code>run</code> calls inside a script are automatically ignored to prevent viewer freezes.</li>
+                </ul>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>run</span><button class="copy-btn" onclick="copyText('run', this)">Copy</button></li>
+                </ul>
+            </section>
+
+<div class="section-divider" id="sec-alignment">Alignment</div>
+
+            <section class="command-card" id="cmd-reference">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">reference</span>
+                        <span class="command-card-desc-title">&ndash; Reset Reference to a Different Sequence</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">reference [target]</div>
+                    <button class="copy-btn" onclick="copyText('reference [target]', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> Dynamically changes the active sequence used as the global alignment reference and reloads the multiple sequence alignment to use the new reference indexing. The &lt;target&gt; can be a substring or wildcard that matches a specific FASTA header. If a substring matches multiple headers, it defaults to the first match and issues a warning. Calling reference without an argument will display the current active reference name.</p>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>reference</span><button class="copy-btn" onclick="copyText('reference', this)">Copy</button></li>
+                    <li class="example-item"><span>reference E1_RA</span><button class="copy-btn" onclick="copyText('reference E1_RA', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-alignment">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">alignment</span>
+                        <span class="command-card-desc-title">&ndash; Switch Active Alignment (MSA)</span>
+                    </div>
+                    <span class="badge badge-new">New</span>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">alignment [alignment_identifier] or alignment list</div>
+                    <button class="copy-btn" onclick="copyText('alignment', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> Dynamically changes the active Multiple Sequence Alignment file (<code>.fasta</code> or <code>.h5</code>) used by the viewer and reloads the MSA mapping.</p>
+                <div class="subheading">Arguments</div>
+                <ul>
+                    <li><strong>Without arguments:</strong> Opens a file dialog explorer to manually select a FASTA or H5 MSA file.</li>
+                    <li><strong><code>alignment_identifier</code>:</strong> An index number or a case-insensitive substring query matching a file in the Multiple Alignments folder.</li>
+                    <li><strong><code>list</code>:</strong> Prints a list of all available alignment files in the Multiple Alignments folder to the console and identifies which one is currently active.</li>
+                </ul>
+                <div class="callout">
+                    <div class="callout-title">⚠️ Loading Rules &amp; Integrity Checks</div>
+                    <p>The sequence headers currently in the viewer must be a strict subset of the sequence headers present in the new MSA file. If any node sequence is missing, the load fails and the viewer automatically rolls back to the previous alignment to maintain session stability.</p>
+                </div>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>alignment</span><button class="copy-btn" onclick="copyText('alignment', this)">Copy</button></li>
+                    <li class="example-item"><span>alignment list</span><button class="copy-btn" onclick="copyText('alignment list', this)">Copy</button></li>
+                    <li class="example-item"><span>alignment 3</span><button class="copy-btn" onclick="copyText('alignment 3', this)">Copy</button></li>
+                    <li class="example-item"><span>alignment kinase_msa</span><button class="copy-btn" onclick="copyText('alignment kinase_msa', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-query">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">query</span>
+                        <span class="command-card-desc-title">&ndash; Alignment Position Query Tool</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">query [expression] &lt;positions&gt;</div>
+                    <button class="copy-btn" onclick="copyText('query', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The query command allows you to instantly interrogate the multiple sequence alignment (MSA) data directly from the viewer. It calculates the amino acid frequencies, consensus distributions, and gap percentages for specific column positions.</p>
+                
+                <div class="callout">
+                    <div class="callout-title">📋 Prerequisites</div>
+                    <p>Requires an active MSA loaded and a reference sequence set (via <code>reference</code> command) to anchor position coordinate numbers.</p>
+                </div>
+
+                <div class="subheading">Targeting &amp; Fallbacks</div>
+                <ul>
+                    <li><strong>Explicit Expression:</strong> Runs query on nodes matching the expression (e.g. <code>#cluster_1#</code>).</li>
+                    <li><strong>Mouse Selection (Fallback 1):</strong> If expression is omitted, queries the nodes currently selected in the viewer.</li>
+                    <li><strong>Global Network (Fallback 2):</strong> If no expression is provided and no selection exists, queries ALL nodes in the network.</li>
+                </ul>
+
+                <div class="subheading">Core Arguments</div>
+                <ul>
+                    <li><strong>Positions:</strong> Specific columns inside brackets, supporting ranges and single positions (e.g., <code>[10-25]</code> or <code>[15,30,45]</code>).</li>
+                    <li><strong>Insertions (Decimals):</strong> Insertion residues are marked using decimals (e.g., <code>106.1</code>, <code>106.2</code>). Querying <code>[106-107]</code> natively prints statistics for 106, 106.1, 106.2, and 107 in order.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>query [10, 15, 20-30]</span><button class="copy-btn" onclick="copyText('query [10, 15, 20-30]', this)">Copy</button></li>
+                    <li class="example-item"><span>query P106 [150-160]</span><button class="copy-btn" onclick="copyText('query P106 [150-160]', this)">Copy</button></li>
+                    <li class="example-item"><span>query {Length&gt;500} [10-20]</span><button class="copy-btn" onclick="copyText('query {Length>500} [10-20]', this)">Copy</button></li>
+                </ul>
+            </section>
+
+<div class="section-divider" id="sec-analysis">Analysis</div>
+
+            <section class="command-card" id="cmd-cluster">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">cluster</span>
+                        <span class="command-card-desc-title">&ndash; Topology Clustering Tool</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">cluster [mode] [parameter] [min_size]</div>
+                    <button class="copy-btn" onclick="copyText('cluster', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The cluster command partitions the currently loaded sequence similarity network into distinct functional communities. It applies color-coded labels to the nodes and records these boundaries for downstream tools (such as sub-alignment and group extraction).</p>
+                
+                <div class="subheading">Arguments</div>
+                <ul>
+                    <li><strong>MODE:</strong> The clustering algorithm to apply: <code>leiden</code>, <code>mcl</code>, or <code>jaccard</code>. Defaults to <code>leiden</code>.</li>
+                    <li><strong>PARAMETER:</strong> The primary tuning variable for the chosen algorithm (resolution or inflation).</li>
+                    <li><strong>MIN_SIZE:</strong> An integer defining the minimum number of nodes required to form a valid cluster. Smaller communities are classified as Noise (grey) and ignored by downstream tools. Defaults to 10.</li>
+                </ul>
+
+                <div class="subheading">Algorithms</div>
+                
+                <div class="collapsible-container">
+                    <div class="collapsible-header">Leiden (Default)</div>
+                    <div class="collapsible-content">
+                        <p><strong>Mechanism:</strong> Optimizes network modularity and density. Highly efficient for massive networks and guarantees well-connected communities. Automatically leverages edge similarity scores as weights. Requires <code>leidenalg</code> and <code>igraph</code>.</p>
+                        <p><strong>Parameter:</strong> <em>Resolution</em> (Default: 1.0). Increasing this value forces the network to fracture into smaller, more numerous clusters.</p>
+                        <p><strong>Usage:</strong> <code>cluster leiden 1.0 10</code> (or simply <code>cluster 1.0 10</code>)</p>
+                    </div>
+                </div>
+
+                <div class="collapsible-container">
+                    <div class="collapsible-header">MCL (Markov Clustering)</div>
+                    <div class="collapsible-content">
+                        <p><strong>Mechanism:</strong> Simulates random walks through the network, assuming that a random walker stays within a dense cluster rather than crossing a sparse boundary. Uses similarity scores as transition probabilities. Requires <code>markov_clustering</code> and <code>networkx</code>.</p>
+                        <p><strong>Parameter:</strong> <em>Inflation</em> (Default: 2.0). Controls rigidity of boundaries. Higher values (e.g. 4.0, 6.0) increase walking penalties, resulting in tighter, tighter clusters.</p>
+                        <p><strong>Usage:</strong> <code>cluster mcl 2.0 10</code></p>
+                    </div>
+                </div>
+
+                <div class="collapsible-container">
+                    <div class="collapsible-header">Jaccard Filter</div>
+                    <div class="collapsible-content">
+                        <p><strong>Mechanism:</strong> Purely topological filter. Calculates the Jaccard index (shared neighbors / total neighbors) for every edge and cuts edges falling below the threshold. Requires <code>numba</code>.</p>
+                        <p><strong>Parameter:</strong> <em>Threshold</em> (Default: 0.2). A float between 0.0 and 1.0. A threshold of 0.2 means connected nodes must share at least 20% of their surrounding neighbors to remain attached.</p>
+                        <p><strong>Usage:</strong> <code>cluster jaccard 0.2 10</code></p>
+                    </div>
+                </div>
+
+                <div class="subheading">Utility Subcommands</div>
+                <ul>
+                    <li><code>cluster list</code>: Prints a detailed report to the console detailing cluster sizes, percentages, and total noise.</li>
+                </ul>
+
+                <div class="subheading">Important Notes</div>
+                <ul>
+                    <li>Clustering is a destructive action to the visual state (overwrites node colors), but can be reverted with the <code>undo</code> command.</li>
+                    <li>Clustering parameters are cached. Downstream sequence alignment tools automatically construct output directories named after your specific parameters (e.g., <code>LEIDEN_1.0_Min10</code>).</li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-subcluster">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">subcluster</span>
+                        <span class="command-card-desc-title">&ndash; Cluster Subclustering Tool</span>
+                    </div>
+                    <span class="badge badge-new">New</span>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">subcluster &lt;cluster_name&gt; [mode] [param_1] [min_size]  |  subcluster clear</div>
+                    <button class="copy-btn" onclick="copyText('subcluster', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> Performs subclustering on a specific topology cluster, creating custom group labels named <code>subcluster_N_M</code> (where N is the original cluster ID, and M is the subcluster ID). Unlike main clusters, these are saved as custom group labels so nodes can keep their original cluster identities.</p>
+                
+                <div class="subheading">Arguments</div>
+                <ul>
+                    <li><strong>&lt;cluster_name&gt;:</strong> Name of the cluster to subcluster (e.g. <code>cluster_2</code>, <code>cluster_5</code>).</li>
+                    <li><strong>clear:</strong> Clears all subcluster groups (<code>subcluster_N_M</code>) from the viewer session.</li>
+                    <li><strong>[min_size]:</strong> (Optional) Minimum size of subclusters to keep (Default: 10). Smaller groups are treated as Noise.</li>
+                </ul>
+
+                <div class="subheading">Modes &amp; Parameters</div>
+                <ul>
+                    <li><strong><code>leiden</code> (Default):</strong> Leiden Community Detection. PARAM_1 represents Resolution (Default: 1.0).</li>
+                    <li><strong><code>mcl</code>:</strong> Markov Clustering Algorithm. PARAM_1 represents Inflation (Default: 2.0).</li>
+                    <li><strong><code>jaccard</code>:</strong> Topology Jaccard filtering. PARAM_1 represents Threshold (Default: 0.2).</li>
+                </ul>
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>subcluster cluster_2</span><button class="copy-btn" onclick="copyText('subcluster cluster_2', this)">Copy</button></li>
+                    <li class="example-item"><span>subcluster cluster_2 mcl 2.0 5</span><button class="copy-btn" onclick="copyText('subcluster cluster_2 mcl 2.0 5', this)">Copy</button></li>
+                    <li class="example-item"><span>subcluster cluster_5 leiden 1.5</span><button class="copy-btn" onclick="copyText('subcluster cluster_5 leiden 1.5', this)">Copy</button></li>
+                    <li class="example-item"><span>subcluster clear</span><button class="copy-btn" onclick="copyText('subcluster clear', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-color">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">color</span>
+                        <span class="command-card-desc-title">&ndash; Advanced Node Styling Tool</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">color [expression] [color] [scale] [shape] [&lt;expression_2&gt; ...]</div>
+                    <button class="copy-btn" onclick="copyText('color', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The color command allows you to rapidly alter the visual state of the network nodes (color, size, and shape) without needing to dig into complex UI menus. It utilizes the Expression Interpreter to pinpoint specific nodes.</p>
+                
+                <div class="subheading">Attributes</div>
+                <ul>
+                    <li><strong>Color:</strong> Standard color names (<code>red</code>, <code>blue</code>, <code>green</code>, etc.) or Hex codes (<code>#ff0000</code>).</li>
+                    <li><strong>Scale:</strong> Size multiplier prefixed with <code>x</code> (e.g. <code>x2</code> for double size, <code>x0.5</code> for half size, <code>x0</code> to hide).</li>
+                    <li><strong>Shape:</strong> circle, square, triangle, star, diamond, cross, x, vbar (vertical bar), and hbar (horizontal bar).</li>
+                </ul>
+
+                <div class="subheading">Usage Mechanics</div>
+                <ul>
+                    <li><strong>Implicit UI Targeting (Quick Route):</strong> If nodes are selected in the viewer with the mouse, you do not need to write an expression. Simply typing <code>color red x2</code> will apply styling directly to your selection.</li>
+                    <li><strong>Chaining Commands:</strong> You can style multiple subsets in a single rapid command, e.g. <code>color #cluster_1# red #cluster_2# blue x1.5</code>.</li>
+                    <li><strong>Attribute Stacking:</strong> You do not need to provide all three attributes. If you only want to scale, simply pass the scale, e.g., <code>color &quot;Mutant&quot; x3</code>.</li>
+                    <li><strong>Undo Support:</strong> Revert color modifications instantly by typing <code>undo</code>.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>color red x2 triangle</span><button class="copy-btn" onclick="copyText('color red x2 triangle', this)">Copy</button></li>
+                    <li class="example-item"><span>color P106 red</span><button class="copy-btn" onclick="copyText('color P106 red', this)">Copy</button></li>
+                    <li class="example-item"><span>color #cluster_1# red #noise# x0</span><button class="copy-btn" onclick="copyText('color #cluster_1# red #noise# x0', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-group">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">group</span>
+                        <span class="command-card-desc-title">&ndash; Custom Group Curation Tool</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">group [expression] &lt;group_name&gt; [&lt;expr_2&gt; &lt;name_2&gt; ...]  |  group list  |  group remove &lt;name_1&gt;</div>
+                    <button class="copy-btn" onclick="copyText('group', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> While the cluster command relies on mathematics to divide the network into distinct communities, the group command allows for human-driven, manual curation. It allows you to tag specific nodes with custom metadata labels.</p>
+                <p>The most important distinction between a Cluster and a Group is exclusivity. A node can only ever belong to <em>one</em> Cluster at a time. However, a single node can belong to <em>unlimited</em> Groups simultaneously (e.g., a node can be tagged as #human#, #kinase#, and #mutant# all at once).</p>
+                
+                <div class="subheading">Group Naming Rules</div>
+                <ul>
+                    <li><strong>No Spaces:</strong> Group names must be continuous strings. Use underscores instead of spaces (e.g. <code>active_site</code>).</li>
+                    <li><strong>Case-Insensitive:</strong> All group names are converted to lowercase internally to prevent matching errors.</li>
+                    <li><strong>Reserved Words:</strong> You cannot name a group <code>noise</code> or <code>cluster_[N]</code> to prevent logic overlap.</li>
+                </ul>
+
+                <div class="subheading">Usage Mechanics</div>
+                <ul>
+                    <li><strong>Implicit UI Targeting:</strong> Selecting nodes in the viewer with the mouse and running <code>group [NAME]</code> assigns that group label directly to the selection.</li>
+                    <li><strong>Advanced Expression Targeting:</strong> Use the Expression Interpreter to assign labels to thousands of nodes instantly. Multiple expressions and names can be chained, e.g. <code>group P106 mutant "Human" human_proteins</code>.</li>
+                </ul>
+
+                <div class="subheading">Managing Groups</div>
+                <ul>
+                    <li><strong>Viewing Groups:</strong> Type <code>group list</code> to print a statistical table showing active custom groups, node counts, and network percentages.</li>
+                    <li><strong>Inspecting Nodes:</strong> Left-clicking a node displays its custom groups on the second line of the tooltip header.</li>
+                    <li><strong>Deleting Groups:</strong> Run <code>group remove &lt;Group1&gt; [Group2]</code> to delete custom groups from the network.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>group active_site</span><button class="copy-btn" onclick="copyText('group active_site', this)">Copy</button></li>
+                    <li class="example-item"><span>group P106 mutant</span><button class="copy-btn" onclick="copyText('group P106 mutant', this)">Copy</button></li>
+                    <li class="example-item"><span>group list</span><button class="copy-btn" onclick="copyText('group list', this)">Copy</button></li>
+                    <li class="example-item"><span>group remove active_site mutant</span><button class="copy-btn" onclick="copyText('group remove active_site mutant', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-select">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">select</span>
+                        <span class="command-card-desc-title">&ndash; Advanced Selection Tool</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">select [mode] &lt;expression&gt;  |  select invert  |  select save &lt;filename&gt;</div>
+                    <button class="copy-btn" onclick="copyText('select', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The select command bridges the gap between visual intuition and rigorous mathematical querying. While you can always select nodes by right-clicking or dragging a box with your mouse, the select tool allows you to instantly highlight thousands of specific nodes using the Common Expression Interpreter. It features powerful modifiers to combine mathematical queries with your manual mouse selections, as well as export capabilities.</p>
+                <p><em>* Note: This command only applies to and selects visible nodes.</em></p>
+                
+                <div class="subheading">Selection Modes</div>
+                <ul>
+                    <li><strong>change (Default):</strong> Wipes your current selection clean and selects only nodes matching the expression.</li>
+                    <li><strong>add / plus / include:</strong> Keeps the current selection and adds new matches to it.</li>
+                    <li><strong>subtract / minus / remove:</strong> Keeps the current selection but deselects nodes matching the expression.</li>
+                    <li><strong>filter / keep / intersect:</strong> Drill-down filter. Keeps only currently selected nodes that match the expression, dropping all others.</li>
+                    <li><strong>invert:</strong> Special toggle mode (takes no expressions). Inverts the selection, highlighting all other visible nodes.</li>
+                </ul>
+
+                <div class="subheading">Exporting Selections (<code>select save</code>)</div>
+                <p>Simple tools to write output lists to the disk (saves to <code>Cache_Files/Header_Lists/</code>):</p>
+                <ul>
+                    <li><strong>Saving Headers (<code>.txt</code>):</strong> If you provide a `.txt` filename (e.g. <code>select save targets.txt</code>), generates a text file containing the exact, full FASTA headers of selected nodes.</li>
+                    <li><strong>Extracting Raw Sequences (<code>.fasta</code>):</strong> If you provide a `.fasta` filename (e.g. <code>select save targets.fasta</code>), extracts raw amino acid sequences from the source sequence file and writes them to a standalone FASTA file.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>select P106</span><button class="copy-btn" onclick="copyText('select P106', this)">Copy</button></li>
+                    <li class="example-item"><span>select add "kinase"</span><button class="copy-btn" onclick="copyText('select add &quot;kinase&quot;', this)">Copy</button></li>
+                    <li class="example-item"><span>select remove #noise#</span><button class="copy-btn" onclick="copyText('select remove #noise#', this)">Copy</button></li>
+                    <li class="example-item"><span>select keep P106</span><button class="copy-btn" onclick="copyText('select keep P106', this)">Copy</button></li>
+                    <li class="example-item"><span>select invert</span><button class="copy-btn" onclick="copyText('select invert', this)">Copy</button></li>
+                    <li class="example-item"><span>select save selected_headers.txt</span><button class="copy-btn" onclick="copyText('select save selected_headers.txt', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-label">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">label</span>
+                        <span class="command-card-desc-title">&ndash; Differential Labeling &amp; SDP Analysis</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">label [target] [global_max] [cluster_min] [global_min]</div>
+                    <button class="copy-btn" onclick="copyText('label', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The label command performs Differential Sequence Analysis. It is designed to identify Specificity-Determining Positions (SDPs)—amino acids that are highly conserved within a specific cluster or group, but vary across the broader protein family. It exports a rich, color-coded Microsoft Excel (.xlsx) report detailing exactly which residues define your sub-families.</p>
+                
+                <div class="callout">
+                    <div class="callout-title">📋 Prerequisites</div>
+                    <p>Because this tool analyzes sequence data rather than just network topology, it requires:
+                    <br>1. An active alignment (MSA) loaded in the viewer session.
+                    <br>2. A reference sequence set via the <code>reference</code> command, which anchors residue numbers.</p>
+                </div>
+
+                <div class="subheading">Targets &amp; Parameters</div>
+                <ul>
+                    <li><strong>TARGET (Default: clusters):</strong> <code>clusters</code> (analyzes topology clusters and manual groups) or <code>groups</code> (skips clusters, analyzes only custom groups).</li>
+                    <li><strong>GLOBAL_MAX (gmax) [Default: 30%]:</strong> Maximum global residue frequency. Highlighted residues must occur in less than this percentage globally to be considered subset-specific.</li>
+                    <li><strong>CLUSTER_MIN (cmin) [Default: 95%]:</strong> Minimum consensus frequency. Highlighted residues must occur in at least this percentage inside the specific cluster.</li>
+                    <li><strong>GLOBAL_MIN (gmin) [Default: 95%]:</strong> Universal conservation threshold. Residues exceeding this frequency globally are highlighted as universally conserved.</li>
+                </ul>
+
+                <div class="subheading">Understanding the Excel Output</div>
+                <p>Output is written to <code>Results/Cluster_Label/</code> and contains two worksheets:</p>
+                <ul>
+                    <li><strong>Subset Stats (SDP Matrix):</strong> Lists clusters/groups in rows and alignment positions in columns. Displays conserved amino acids colored by gap-occupancy.</li>
+                    <li><strong>Occupancy Stats:</strong> Provides gap-occupancy percentages for every position, highlighted in green. Useful for identifying insertion/deletion variations across subfamilies.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>label</span><button class="copy-btn" onclick="copyText('label', this)">Copy</button></li>
+                    <li class="example-item"><span>label 30% 90% 95%</span><button class="copy-btn" onclick="copyText('label 30% 90% 95%', this)">Copy</button></li>
+                    <li class="example-item"><span>label groups cmin 90%</span><button class="copy-btn" onclick="copyText('label groups cmin 90%', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-export">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">export</span>
+                        <span class="command-card-desc-title">&ndash; FASTA Sequence Export Tool</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">export [target]</div>
+                    <button class="copy-btn" onclick="copyText('export', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The export command acts as a bridge between the visual network and your local file system. It allows you to physically isolate communities of sequences (either mathematically defined clusters or manually defined groups) and save them as independent .fasta files. This is essential for taking a massive dataset, finding a specific protein family visually, and extracting those sequences for downstream alignment, HMM generation, or structural modeling.</p>
+                
+                <div class="subheading">Targets &amp; Extraction Modes</div>
+                <ul>
+                    <li><strong>clusters (Default):</strong> Run as <code>export</code> or <code>export clusters</code>. Generates a separate <code>.fasta</code> file for every valid mathematical cluster (e.g. <code>Cluster_0.fasta</code>). Noise nodes are skipped to ensure data conservation.</li>
+                    <li><strong>groups / group:</strong> Run as <code>export groups</code>. Generates a separate <code>.fasta</code> file for every custom group label currently defined in the session.</li>
+                    <li><strong>group:&lt;Name&gt;:</strong> Exports only specific custom groups (e.g. <code>export group:kinase</code>). Multiple specific groups can be chained.</li>
+                </ul>
+
+                <div class="subheading">Fidelity &amp; Routing</div>
+                <ul>
+                    <li><strong>Source Fidelity:</strong> Maps visual nodes back to the original source sequence file defined in configuration, preserving full sequence data.</li>
+                    <li><strong>Auto-Open:</strong> On Windows, successfully completing an export will automatically open the output directory in File Explorer.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>export</span><button class="copy-btn" onclick="copyText('export', this)">Copy</button></li>
+                    <li class="example-item"><span>export groups</span><button class="copy-btn" onclick="copyText('export groups', this)">Copy</button></li>
+                    <li class="example-item"><span>export group:human</span><button class="copy-btn" onclick="copyText('export group:human', this)">Copy</button></li>
+                </ul>
+            </section>
+
+<div class="section-divider" id="sec-metadata">Meta Data</div>
+
+            <section class="command-card" id="cmd-meta">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">meta</span>
+                        <span class="command-card-desc-title">&ndash; Node Metadata Manager Tool</span>
+                    </div>
+                    <span class="badge badge-new">New</span>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">meta  |  meta show &lt;property_name&gt;  |  meta download [filename] [expression]</div>
+                    <button class="copy-btn" onclick="copyText('meta', this)">Copy</button>
+                </div>
+                <p><strong>Function:</strong> Manages node metadata by allowing users to upload Excel/CSV tables, display metadata in the HUD, or download/export metadata subsets based on logical expressions.</p>
+                
+                <div class="subheading">Subcommands &amp; Usage</div>
+                <ul>
+                    <li><strong><code>meta</code> (No Arguments):</strong> Opens a file dialog explorer to select metadata files (Excel <code>.xlsx</code>/<code>.xls</code> or CSV <code>.csv</code>) to merge into the current session. Files must contain sequence headers in the first column, property names in the first row, and property types (number/text) in the second row.</li>
+                    <li><strong><code>meta show &lt;property_name&gt;</code> / <code>meta display &lt;property_name&gt;</code>:</strong> Activates a HUD text box in the bottom-right corner of the viewer displaying the value of the specified property when a node is clicked.</li>
+                    <li><strong><code>meta show clear</code> / <code>meta show off</code>:</strong> Deactivates and hides the metadata property HUD.</li>
+                    <li><strong><code>meta retrieve / download / export [filename] [expression]</code>:</strong> Exports session metadata to an Excel or CSV file in the metadata cache directory, optionally filtered by a logical expression. If no filename is provided, opens a save file dialog.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>meta</span><button class="copy-btn" onclick="copyText('meta', this)">Copy</button></li>
+                    <li class="example-item"><span>meta show Organism</span><button class="copy-btn" onclick="copyText('meta show Organism', this)">Copy</button></li>
+                    <li class="example-item"><span>meta show clear</span><button class="copy-btn" onclick="copyText('meta show clear', this)">Copy</button></li>
+                    <li class="example-item"><span>meta download {Length>500}</span><button class="copy-btn" onclick="copyText('meta download {{Length>500}}', this)">Copy</button></li>
+                    <li class="example-item"><span>meta export selected_meta.xlsx #cluster_1#</span><button class="copy-btn" onclick="copyText('meta export selected_meta.xlsx #cluster_1#', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-spectrum">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">spectrum</span>
+                        <span class="command-card-desc-title">&ndash; Spectrum Coloring Tool</span>
+                    </div>
+                    <span class="badge badge-new">New</span>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">spectrum [expression] prop:&lt;property_name&gt; [scheme:&lt;color_scheme&gt;]</div>
+                    <button class="copy-btn" onclick="copyText('spectrum', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> Colors visible nodes along a color gradient (spectrum) based on the values of a numerical property. Automatically calls the <code>meta display</code> command to display the selected property in the HUD when a node is clicked.</p>
+                
+                <div class="subheading">Arguments</div>
+                <ul>
+                    <li><strong>prop:&lt;property_name&gt; / property:&lt;property_name&gt;:</strong> The target numerical property name from the loaded metadata (e.g. <code>prop:Length</code>).</li>
+                    <li><strong>scheme:&lt;color_scheme&gt; / color:&lt;color_scheme&gt;:</strong> (Optional) Matplotlib colormap name. Defaults to <code>coolwarm</code>.</li>
+                    <li><strong>[expression]:</strong> (Optional) Logical expression to select which nodes are colored. If omitted, all nodes in the network are colored.</li>
+                </ul>
+
+                <div class="subheading">Colormap Schemes</div>
+                <ul>
+                    <li><strong>Perceptually Uniform:</strong> viridis, plasma, inferno, magma, cividis</li>
+                    <li><strong>Sequential:</strong> Blues, BuGn, BuPu, GnBu, Greens, Greys, Oranges, OrRd, PuBu, PuBuGn, PuRd, Purples, RdPu, Reds, YlGn, YlGnBu, YlOrBr, YlOrRd</li>
+                    <li><strong>Diverging:</strong> coolwarm, bwr, seismic, spectral, BrBG, PiYG, PRGn, PuOr, RdBu, RdGy, RdYlBu, RdYlGn</li>
+                    <li><strong>Cyclic:</strong> twilight, twilight_shifted, hsv</li>
+                    <li><strong>Qualitative:</strong> tab10, tab20, tab20b, tab20c, Pastel1, Pastel2, Paired, Accent, Dark2, Set1, Set2, Set3</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>spectrum prop:Length</span><button class="copy-btn" onclick="copyText('spectrum prop:Length', this)">Copy</button></li>
+                    <li class="example-item"><span>spectrum property:Length color:plasma</span><button class="copy-btn" onclick="copyText('spectrum property:Length color:plasma', this)">Copy</button></li>
+                    <li class="example-item"><span>spectrum #cluster_1# prop:Length scheme:coolwarm</span><button class="copy-btn" onclick="copyText('spectrum #cluster_1# prop:Length scheme:coolwarm', this)">Copy</button></li>
+                    <li class="example-item"><span>spectrum {Organism=*coli*} property:Length</span><button class="copy-btn" onclick="copyText('spectrum {{Organism=*coli*}} property:Length', this)">Copy</button></li>
+                </ul>
+            </section>
+
+<div class="section-divider" id="sec-graphics">Graphics</div>
+
+            <section class="command-card" id="cmd-print">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">print</span>
+                        <span class="command-card-desc-title">&ndash; Image Export &amp; Snapshot Tool</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">print [filename] [modifiers]</div>
+                    <button class="copy-btn" onclick="copyText('print', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The print command captures exactly what you see in the viewer and exports it as a 2D image file, ready for publication or presentation. All images are automatically routed to the Results/Saved_Images/ directory.</p>
+                
+                <div class="subheading">Modifiers</div>
+                <ul>
+                    <li><strong>transparent:</strong> Removes the solid background, making the output PNG transparent.</li>
+                    <li><strong>full:</strong> Bypasses OpenGL camera edge-clipping. Automatically pans the camera across the network, captures high-resolution tiles, and stitches them into a massive, ultra-high-resolution PNG. Can be combined with transparency.</li>
+                    <li><strong>svg:</strong> Shuts down the OpenGL viewer, ports data into Matplotlib, and plots a Scalable Vector Graphic (SVG) for infinite zoom. Cannot be combined with other modifiers.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>print my_network</span><button class="copy-btn" onclick="copyText('print my_network', this)">Copy</button></li>
+                    <li class="example-item"><span>print my_network transparent</span><button class="copy-btn" onclick="copyText('print my_network transparent', this)">Copy</button></li>
+                    <li class="example-item"><span>print my_network full transparent</span><button class="copy-btn" onclick="copyText('print my_network full transparent', this)">Copy</button></li>
+                    <li class="example-item"><span>print my_network svg</span><button class="copy-btn" onclick="copyText('print my_network svg', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <section class="command-card" id="cmd-logo">
+                <div class="command-card-header">
+                    <div class="command-card-title">
+                        <span class="command-card-name">logo</span>
+                        <span class="command-card-desc-title">&ndash; Sequence Logo Generator</span>
+                    </div>
+                    
+                </div>
+                <div class="syntax-box">
+                    <div class="syntax-content">logo [expression] &lt;positions&gt; [filename] [mode] [gap_mode] [color_scheme]</div>
+                    <button class="copy-btn" onclick="copyText('logo', this)">Copy</button>
+                </div>
+                <p><strong>Overview:</strong> The logo command generates publication-ready sequence logos (in vector .svg or transparent .png format) to visually represent amino acid conservation across a specific subset of your network. By combining this tool with the Common Expression Interpreter, you can instantly compare the binding motifs, active sites, or structural variations of different protein sub-families directly from the viewer.</p>
+                
+                <div class="callout">
+                    <div class="callout-title">📋 Prerequisites</div>
+                    <p>Requires an active MSA loaded and a reference sequence set (via <code>reference</code> command) to anchor position coordinate numbers.</p>
+                </div>
+
+                <div class="subheading">Core Arguments</div>
+                <ul>
+                    <li><strong>[POSITIONS] (Required):</strong> Comma-separated list or ranges in brackets (e.g. <code>[10-25]</code>).</li>
+                    <li><strong>FILENAME:</strong> Output file ending in <code>.svg</code> or <code>.png</code>. Saved to <code>Results/Sequence_Logos/</code>.</li>
+                    <li><strong>MODE:</strong> <code>bits</code> (Default - Shannon Information Content) or <code>pcts</code> (Percentages).</li>
+                    <li><strong>GAP_MODE:</strong> <code>with_gap</code> (Default - scales stack height by occupancy) or <code>no_gap</code> (ignores gaps).</li>
+                    <li><strong>COLOR_SCHEME:</strong> Preset color scheme. Defaults to <code>chemistry</code>. Presets: chemistry, classic, grays, base_pairing, colorblind_safe, charge, hydrophobicity, etc.</li>
+                </ul>
+
+                <div class="subheading">Examples</div>
+                <ul class="example-list">
+                    <li class="example-item"><span>logo [10-20]</span><button class="copy-btn" onclick="copyText('logo [10-20]', this)">Copy</button></li>
+                    <li class="example-item"><span>logo #cluster_1# [1,5] pcts no_gap</span><button class="copy-btn" onclick="copyText('logo #cluster_1# [1,5] pcts no_gap', this)">Copy</button></li>
+                    <li class="example-item"><span>logo [10-20] color=charge</span><button class="copy-btn" onclick="copyText('logo [10-20] color=charge', this)">Copy</button></li>
+                </ul>
+            </section>
+
+
+            <div class="empty-search-state" id="empty-search-state">
+                No commands matched your query. Try searching for a different term!
+            </div>
+        </div> <!-- end .content-wrapper -->
+    </main>
+
+    <script>
+        // Copy to clipboard function
+        function copyText(text, btnElement) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = btnElement.innerText;
+                btnElement.innerText = "Copied!";
+                btnElement.classList.add("copied");
+                setTimeout(() => {
+                    btnElement.innerText = originalText;
+                    btnElement.classList.remove("copied");
+                }, 1500);
+            }).catch(err => {
+                console.error('Could not copy text: ', err);
+            });
+        }
+
+        // Collapsible items logic
+        document.querySelectorAll('.collapsible-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const container = header.parentElement;
+                container.classList.toggle('open');
+            });
+        });
+
+        // Search Filter logic
+        const searchInput = document.getElementById('search-input');
+        const cards = document.querySelectorAll('.command-card');
+        const menuItems = document.querySelectorAll('.menu-item');
+        const dividers = document.querySelectorAll('.section-divider');
+        const emptyState = document.getElementById('empty-search-state');
+
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            let hasMatches = false;
+
+            cards.forEach(card => {
+                const id = card.id;
+                // Exclude introductory block and only search command cards
+                if (!id.startsWith('cmd-') && id !== 'expr-interpreter') {
+                    return; 
+                }
+
+                const cardText = card.textContent.toLowerCase();
+                const matches = cardText.includes(query);
+
+                if (matches) {
+                    card.style.display = 'block';
+                    hasMatches = true;
+                } else {
+                    card.style.display = 'none';
+                }
+
+                // If this is a command card, toggle its corresponding menu item
+                if (id.startsWith('cmd-')) {
+                    const menuItem = document.querySelector(`.menu-item[data-target="${id}"]`);
+                    if (menuItem) {
+                        menuItem.style.display = matches ? 'block' : 'none';
+                    }
+                }
+            });
+
+            // Handle dividers visibility based on visible child cards
+            dividers.forEach(div => {
+                const targetId = div.id;
+                let visibleChildren = false;
+
+                if (targetId === 'sec-core') {
+                    visibleChildren = Array.from(document.querySelectorAll('#cmd-zoom, #cmd-save, #cmd-reset, #cmd-hide, #cmd-undoredo, #cmd-run'))
+                        .some(el => el.style.display !== 'none');
+                } else if (targetId === 'sec-alignment') {
+                    visibleChildren = Array.from(document.querySelectorAll('#cmd-reference, #cmd-alignment, #cmd-query'))
+                        .some(el => el.style.display !== 'none');
+                } else if (targetId === 'sec-analysis') {
+                    visibleChildren = Array.from(document.querySelectorAll('#cmd-cluster, #cmd-subcluster, #cmd-color, #cmd-group, #cmd-select, #cmd-label, #cmd-export'))
+                        .some(el => el.style.display !== 'none');
+                } else if (targetId === 'sec-metadata') {
+                    visibleChildren = Array.from(document.querySelectorAll('#cmd-meta, #cmd-spectrum'))
+                        .some(el => el.style.display !== 'none');
+                } else if (targetId === 'sec-graphics') {
+                    visibleChildren = Array.from(document.querySelectorAll('#cmd-print, #cmd-logo'))
+                        .some(el => el.style.display !== 'none');
+                } else if (targetId === 'expr-interpreter' || targetId === 'expr-boolean') {
+                    const exprCard = document.querySelector('.command-card[id="expr-interpreter"]');
+                    visibleChildren = exprCard && exprCard.style.display !== 'none';
+                }
+
+                div.style.display = visibleChildren ? 'block' : 'none';
+            });
+
+            emptyState.style.display = hasMatches || query === "" ? 'none' : 'block';
+        });
+
+        // Safe localStorage access wrappers for file:// protocol compatibility
+        function safeGetTheme() {
+            try {
+                return localStorage.getItem('theme');
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function safeSetTheme(theme) {
+            try {
+                localStorage.setItem('theme', theme);
+            } catch (e) {
+                // Ignore storage errors in file:// environments
+            }
+        }
+
+        // Theme Toggle Logic
+        const themeBtn = document.getElementById('theme-toggle-btn');
+        const themeIcon = document.getElementById('theme-icon');
+        const themeText = document.getElementById('theme-text');
+        
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            safeSetTheme(theme);
+            if (theme === 'dark') {
+                themeIcon.innerText = "☀️";
+                themeText.innerText = "Light Mode";
+            } else {
+                themeIcon.innerText = "🌙";
+                themeText.innerText = "Dark Mode";
+            }
+        }
+
+        // Initialize theme based on local storage or system preference
+        const savedTheme = safeGetTheme();
+        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        
+        if (savedTheme) {
+            setTheme(savedTheme);
+        } else {
+            setTheme(systemPrefersDark ? 'dark' : 'light');
+        }
+
+        // Listen for system theme changes dynamically
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+            if (!safeGetTheme()) {
+                setTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+
+        themeBtn.addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+        });
+
+        // Sidebar active link highlighting and smooth scroll behavior
+        const sections = document.querySelectorAll('section, header, div.section-divider');
+        const navMenuItems = document.querySelectorAll('.menu-item');
+        const options = {
+            root: null,
+            threshold: 0.1,
+            rootMargin: "-10% 0px -70% 0px"
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const id = entry.target.getAttribute('id');
+                    if (id) {
+                        navMenuItems.forEach(item => {
+                            if (item.getAttribute('data-target') === id) {
+                                item.classList.add('active');
+                            } else {
+                                item.classList.remove('active');
+                            }
+                        });
+                    }
+                }
+            });
+        }, options);
+
+        sections.forEach(section => {
+            observer.observe(section);
+        });
+
+        // Highlight card when navigating directly via hash
+        function highlightTargetCard() {
+            const hash = window.location.hash;
+            if (hash) {
+                const targetCard = document.querySelector(hash);
+                if (targetCard && targetCard.classList.contains('command-card')) {
+                    document.querySelectorAll('.command-card').forEach(c => c.classList.remove('highlight-card'));
+                    targetCard.classList.add('highlight-card');
+                    setTimeout(() => {
+                        targetCard.classList.remove('highlight-card');
+                    }, 3000);
+                }
+            }
+        }
+
+        window.addEventListener('hashchange', highlightTargetCard);
+        window.addEventListener('load', highlightTargetCard);
+
+        // Sidebar Toggle Logic
+        const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+
+        toggleSidebarBtn.addEventListener('click', () => {
+            document.body.classList.toggle('sidebar-collapsed');
+        });
+    </script>
+</body>
+</html>
