@@ -265,8 +265,14 @@ def print_help(meta_dir_help):
     ==========================
     Usage:
       meta
-          Opens a file explorer to manually select a metadata file (.xlsx, .xls, .csv)
-          to upload and merge into the current viewer session.
+          Opens the HTML5 Metadata Spreadsheet in your web browser and adds the 
+          "📊 Meta Data" shortcut button to the collapsible VisPy side panel.
+      meta upload / import
+          Opens a file explorer dialog to manually select a metadata file (.xlsx, .xls, .csv)
+          to upload and merge into the current viewer session. Also adds the 
+          "📊 Meta Data" shortcut button to the VisPy side panel.
+      meta upload / import <filename>
+          Uploads and merges the specified metadata file directly.
       meta display/show <property_name>
           Displays the selected property of a node in the top-right corner of the window
           whenever a node is left-clicked.
@@ -282,6 +288,8 @@ def print_help(meta_dir_help):
 
     Examples:
       meta
+      meta upload
+      meta upload my_data.xlsx
       meta show Organism
       meta show clear
       meta download
@@ -479,6 +487,40 @@ def inject_spreadsheet_panel(viewer, show_sidebar=True):
             viewer.set_sidebar_visible(False)
 
 def run(viewer, args):
+    # Register the button only when:
+    # 1. Called alone (not args)
+    # 2. Called to upload/import a file (args[0] in ['upload', 'import'])
+    # 3. Restoring persistent state (args[0] == '--register-only')
+    should_register = (not args or 
+                       (args and args[0].lower() in ['upload', 'import']) or 
+                       (args and args[0] == '--register-only'))
+
+    if should_register and hasattr(viewer, 'add_sidebar_button'):
+        viewer.add_sidebar_button(
+            name="metaDataBtn",
+            label="📊 Meta Data",
+            callback=viewer.open_metadata_ui,
+            tooltip="Open Metadata Spreadsheet in browser"
+        )
+        if not hasattr(viewer, 'sidebar_buttons_to_persist'):
+            viewer.sidebar_buttons_to_persist = []
+        if "meta" not in viewer.sidebar_buttons_to_persist:
+            viewer.sidebar_buttons_to_persist.append("meta")
+
+    # If --register-only is specified, return early without opening browser
+    if args and args[0] == '--register-only':
+        return
+
+    # If no arguments are provided, open the Web UI in the default browser
+    if not args:
+        import webbrowser
+        webbrowser.open("http://localhost:8000/metadata.html")
+        if hasattr(viewer, 'console_text'):
+            viewer.console_text.text = "Metadata UI opened at http://localhost:8000/metadata.html"
+            if hasattr(viewer, 'update_console_background'):
+                viewer.update_console_background()
+        return
+
     # --- 1. Help & Usage ---
     import SSN_Config as cfg
     meta_dir = getattr(cfg, 'METADATA_DIR', os.path.join("Cache_Files", "Meta_Data"))
@@ -572,7 +614,7 @@ def run(viewer, args):
     filename = ""
     expr = None
 
-    # Check if download mode is requested
+    # Check if download or upload mode is requested
     if args and args[0].lower() in ['retrieve', 'download', 'export']:
         is_download = True
         
@@ -618,11 +660,21 @@ def run(viewer, args):
                 msg = f"Error opening save dialog: {e}"
                 Command_Engine.print_help(viewer, msg)
                 return
+    elif args and args[0].lower() in ['upload', 'import']:
+        is_upload = True
     else:
+        # Unrecognized subcommand or argument format
+        msg = f"Error: Unrecognized subcommand '{args[0]}'. Use 'meta upload <filename>' to load metadata."
+        Command_Engine.print_help(viewer, msg)
+        return
+
+    if is_upload:
         # Upload mode
-        if args:
+        # Filter out generic keywords to trigger file selection dialog when no specific paths are passed
+        upload_args = [a for a in args if a.lower() not in ['upload', 'import']]
+        if upload_args:
             file_paths = []
-            for arg in args:
+            for arg in upload_args:
                 path = arg.strip()
                 # 1. Check if direct path exists
                 if os.path.exists(path):
@@ -923,10 +975,13 @@ def run(viewer, args):
             f"Matched {len(matched_nodes)} unique nodes, ignored {total_unmatched} rows. "
             f"Merged properties: {', '.join(sorted(all_merged_props))}."
         )
-        # Inject side panel spreadsheet and refresh its columns
-        inject_spreadsheet_panel(viewer)
-        if hasattr(viewer, 'metadata_source_model'):
-            viewer.metadata_source_model.refresh_columns()
+        # Broadcast the updated metadata state to the HTML5 browser
+        viewer.broadcast_event({
+            "type": "state_updated",
+            "visible_mask": viewer.visible_mask.tolist(),
+            "selected_indices": viewer.selected_indices,
+            "metadata": viewer.get_serializable_metadata()
+        })
     if failed_files:
         fail_details = "; ".join([f"{f}: {err}" for f, err in failed_files])
         msg_parts.append(f"Failed to upload from {len(failed_files)} file(s): {fail_details}")

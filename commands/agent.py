@@ -11,7 +11,7 @@ from vispy import app
 
 def print_help(viewer):
     msg = (
-        "Usage: assist [subcommand] OR assist <natural language query>\n\n"
+        "Usage: agent [subcommand] OR agent <natural language query>\n\n"
         "Subcommands:\n"
         "  api                      - Activates the hosted API server (e.g. Gemini)\n"
         "  local                    - Activates local backend (probes LM Studio/Ollama, falls back to GGUF)\n"
@@ -19,11 +19,11 @@ def print_help(viewer):
         "  status                   - Shows current backend and loading status\n"
         "  clear / reset            - Clears current context window history\n\n"
         "Examples:\n"
-        "  assist api\n"
-        "  assist local\n"
-        "  assist color cluster 3 red\n"
-        "  assist zoom to 600\n"
-        "  assist deactivate"
+        "  agent api\n"
+        "  agent local\n"
+        "  agent color cluster 3 red\n"
+        "  agent zoom to 600\n"
+        "  agent deactivate"
     )
     Command_Engine.print_help(viewer, msg)
 
@@ -70,8 +70,8 @@ def detect_running_servers():
     return None
 
 def find_local_gguf():
-    """Searches commands/assist_resource/ for the first GGUF file."""
-    resource_dir = os.path.join("commands", "assist_resource")
+    """Searches web_ui/agent_resource/ for the first GGUF file."""
+    resource_dir = os.path.join("web_ui", "agent_resource")
     if not os.path.isdir(resource_dir):
         return None
     for file in os.listdir(resource_dir):
@@ -91,9 +91,9 @@ def load_gguf_model(gguf_path):
         )
 
 def load_config():
-    """Loads configuration from commands/assist_resource/assist_config.json and api_secrets.json."""
-    config_path = os.path.join("commands", "assist_resource", "assist_config.json")
-    secrets_path = os.path.join("commands", "assist_resource", "api_secrets.json")
+    """Loads configuration from web_ui/agent_resource/agent_config.json and api_secrets.json."""
+    config_path = os.path.join("web_ui", "agent_resource", "agent_config.json")
+    secrets_path = os.path.join("web_ui", "agent_resource", "api_secrets.json")
     defaults = {
         "api_url": None,
         "model_name": None,
@@ -111,7 +111,7 @@ def load_config():
             with open(config_path, "r", encoding="utf-8") as f:
                 config.update(json.load(f))
         except Exception as e:
-            print(f"Warning: Failed to parse assist_config.json: {e}")
+            print(f"Warning: Failed to parse agent_config.json: {e}")
             
     # 2. Load private API secrets (ignored by git)
     if os.path.exists(secrets_path):
@@ -125,7 +125,7 @@ def load_config():
             
     return config
 
-def activate_assistant(viewer, force_backend=None, quiet=False):
+def activate_agent(viewer, force_backend=None, quiet=False):
     """Initializes LLM backend based on config preferences, force override, and availability."""
     config = load_config()
     
@@ -142,11 +142,11 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
     
     backend_details = None
     
-    deactivate_assistant(viewer, quiet=True)
+    deactivate_agent(viewer, quiet=True)
     
     if prefer_backend == "api":
         if not api_url:
-            Command_Engine.print_help(viewer, "Error: API url is not configured in assist_config.json.")
+            Command_Engine.print_help(viewer, "Error: API url is not configured in agent_config.json.")
             return False
         backend_details = {
             "name": "Hosted API",
@@ -156,7 +156,7 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
         
     elif prefer_backend == "local":
         if not quiet:
-            print("Assist: Probing local API servers (Ollama, LM Studio, Llama.cpp)...")
+            print("Agent: Probing local API servers (Ollama, LM Studio, Llama.cpp)...")
         backend_details = detect_running_servers()
         
         if not backend_details:
@@ -166,7 +166,7 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
                 
             if gguf_path and os.path.exists(gguf_path):
                 if not quiet:
-                    print(f"Assist: Found local GGUF model: {os.path.basename(gguf_path)}. Loading...")
+                    print(f"Agent: Found local GGUF model: {os.path.basename(gguf_path)}. Loading...")
                 if hasattr(app, 'process_events'):
                     app.process_events()
                 try:
@@ -177,12 +177,12 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
                     viewer.llm_loaded = True
                     viewer.llm_temperature = temperature
                     
-                    msg = f"LLM Assist Activated: Local GGUF ({os.path.basename(gguf_path)})"
+                    msg = f"LLM Agent Activated: Local GGUF ({os.path.basename(gguf_path)})"
                     if not quiet:
                         Command_Engine.print_help(viewer, msg)
                     return True
                 except Exception as e:
-                    print(f"Assist: Failed to load local GGUF model: {e}")
+                    print(f"Agent: Failed to load local GGUF model: {e}")
                     Command_Engine.print_help(viewer, f"Error: GGUF model loading failed: {e}")
                     return False
             else:
@@ -199,7 +199,7 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
                 }
             else:
                 if not quiet:
-                    print("Assist: Probing local API servers (Ollama, LM Studio, Llama.cpp)...")
+                    print("Agent: Probing local API servers (Ollama, LM Studio, Llama.cpp)...")
                 backend_details = detect_running_servers()
                 
         if not backend_details and prefer_backend in ["auto", "gguf"]:
@@ -209,7 +209,7 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
                 
             if gguf_path and os.path.exists(gguf_path):
                 if not quiet:
-                    print(f"Assist: Found local GGUF model: {os.path.basename(gguf_path)}. Loading...")
+                    print(f"Agent: Found local GGUF model: {os.path.basename(gguf_path)}. Loading...")
                 if hasattr(app, 'process_events'):
                     app.process_events()
                 try:
@@ -220,12 +220,12 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
                     viewer.llm_loaded = True
                     viewer.llm_temperature = temperature
                     
-                    msg = f"LLM Assist Activated: Local GGUF ({os.path.basename(gguf_path)})"
+                    msg = f"LLM Agent Activated: Local GGUF ({os.path.basename(gguf_path)})"
                     if not quiet:
                         Command_Engine.print_help(viewer, msg)
                     return True
                 except Exception as e:
-                    print(f"Assist: Failed to load local GGUF model: {e}")
+                    print(f"Agent: Failed to load local GGUF model: {e}")
                     if prefer_backend == "gguf":
                         Command_Engine.print_help(viewer, f"Error: GGUF model loading failed: {e}")
                         return False
@@ -238,28 +238,28 @@ def activate_assistant(viewer, force_backend=None, quiet=False):
         viewer.llm_temperature = temperature
         viewer.llm_api_key = api_key
         
-        msg = f"LLM Assist Activated: Server ({backend_details['name']}) -> {backend_details['model']}"
+        msg = f"LLM Agent Activated: Server ({backend_details['name']}) -> {backend_details['model']}"
         if not quiet:
             Command_Engine.print_help(viewer, msg)
         return True
         
     err_msg = (
-        "Error: Could not activate assist.\n"
+        "Error: Could not activate agent.\n"
         "No local running LLM server (Ollama, LM Studio, Llama.cpp) was detected, "
-        "and no GGUF file was found in 'commands/assist_resource/'.\n"
+        "and no GGUF file was found in 'web_ui/agent_resource/'.\n"
         "Please ensure a local server is running or place a GGUF model in the resource folder."
     )
     Command_Engine.print_help(viewer, err_msg)
     return False
 
-def deactivate_assistant(viewer, quiet=False):
-    """Deactivates LLM assist and unloads model components from memory."""
+def deactivate_agent(viewer, quiet=False):
+    """Deactivates LLM agent and unloads model components from memory."""
     if hasattr(viewer, 'llm_history'):
         viewer.llm_history = []
         
     if not getattr(viewer, 'llm_loaded', False):
         if not quiet:
-            Command_Engine.print_help(viewer, "Assist is already inactive.")
+            Command_Engine.print_help(viewer, "Agent is already inactive.")
         return
         
     backend = getattr(viewer, 'llm_backend', None)
@@ -289,13 +289,13 @@ def deactivate_assistant(viewer, quiet=False):
     except ImportError:
         pass
         
-    msg = f"LLM Assist Deactivated. Unloaded: {model_name} ({backend})"
+    msg = f"LLM Agent Deactivated. Unloaded: {model_name} ({backend})"
     if not quiet:
         Command_Engine.print_help(viewer, msg)
 
 def print_status(viewer):
     if not getattr(viewer, 'llm_loaded', False):
-        Command_Engine.print_help(viewer, "Assist Status: Deactivated (no LLM loaded)")
+        Command_Engine.print_help(viewer, "Agent Status: Deactivated (no LLM loaded)")
         return
         
     backend = getattr(viewer, 'llm_backend', None)
@@ -303,9 +303,9 @@ def print_status(viewer):
     
     if backend == "server":
         url = getattr(viewer, 'llm_url', "")
-        msg = f"Assist Status: Active\n  Backend: Server API ({url})\n  Model: {model}"
+        msg = f"Agent Status: Active\n  Backend: Server API ({url})\n  Model: {model}"
     else:
-        msg = f"Assist Status: Active\n  Backend: Local GGUF\n  Model: {model}"
+        msg = f"Agent Status: Active\n  Backend: Local GGUF\n  Model: {model}"
         
     Command_Engine.print_help(viewer, msg)
 
@@ -341,11 +341,18 @@ def call_api(url, model, system_prompt, user_query, history=None, temperature=0.
         with urllib.request.urlopen(req, timeout=15.0) as response:
             res_data = json.loads(response.read().decode("utf-8"))
             if "choices" in res_data and len(res_data["choices"]) > 0:
-                return res_data["choices"][0]["message"]["content"].strip()
+                content = res_data["choices"][0]["message"]["content"].strip()
+                usage = res_data.get("usage", {})
+                tokens = {
+                    "prompt": usage.get("prompt_tokens", 0),
+                    "completion": usage.get("completion_tokens", 0),
+                    "total": usage.get("total_tokens", 0)
+                }
+                return {"content": content, "tokens": tokens}
     except urllib.error.HTTPError as e:
         try:
             body = e.read().decode("utf-8")
-            print(f"\n[Assist Error Detail]\nHTTP Status Code: {e.code}\nServer Response: {body}\n")
+            print(f"\n[Agent Error Detail]\nHTTP Status Code: {e.code}\nServer Response: {body}\n")
         except Exception:
             pass
         raise e
@@ -363,9 +370,18 @@ def call_gguf(llm, system_prompt, user_query, history=None, temperature=0.0):
     
     res = llm(prompt, max_tokens=150, stop=["<|im_end|>", "\n\n", "Input:"], temp=temperature)
     if "choices" in res and len(res["choices"]) > 0:
-        return res["choices"][0]["text"].strip()
+        content = res["choices"][0]["text"].strip()
+        usage = res.get("usage", {})
+        tokens = {
+            "prompt": usage.get("prompt_tokens", 0),
+            "completion": usage.get("completion_tokens", 0),
+            "total": usage.get("total_tokens", 0)
+        }
+        return {"content": content, "tokens": tokens}
+    return None
+
 class AgentWorker(QtCore.QThread):
-    finished = QtCore.pyqtSignal(str, str) # Emits: (response, error_message)
+    finished = QtCore.pyqtSignal(str, str, str) # Emits: (response, tokens_json, error_message)
     
     def __init__(self, backend, url, model_name, system_prompt, query, history, temperature, api_key, gguf_model):
         super().__init__()
@@ -381,439 +397,355 @@ class AgentWorker(QtCore.QThread):
         
     def run(self):
         try:
-            translated_output = None
+            res_dict = None
             if self.backend == "server":
-                translated_output = call_api(self.url, self.model_name, self.system_prompt, self.query, self.history, self.temperature, self.api_key)
+                res_dict = call_api(self.url, self.model_name, self.system_prompt, self.query, self.history, self.temperature, self.api_key)
             elif self.backend == "gguf":
-                translated_output = call_gguf(self.gguf_model, self.system_prompt, self.query, self.history, self.temperature)
+                res_dict = call_gguf(self.gguf_model, self.system_prompt, self.query, self.history, self.temperature)
             
-            if not translated_output:
-                self.finished.emit("", "No response received from LLM.")
+            if not res_dict or not res_dict.get("content"):
+                self.finished.emit("", "", "No response received from LLM.")
             else:
-                self.finished.emit(translated_output, "")
+                tokens_json = json.dumps(res_dict.get("tokens", {}))
+                self.finished.emit(res_dict["content"], tokens_json, "")
         except Exception as e:
-            self.finished.emit("", str(e))
+            self.finished.emit("", "", str(e))
 
-class AgentPanel(QtWidgets.QWidget):
-    def __init__(self, viewer):
-        super().__init__()
-        self.viewer = viewer
-        self.worker = None
-        self.init_ui()
-        self.update_backend_ui_from_state()
-
-    def init_ui(self):
-        # Set light theme stylesheet matching the viewer's layout
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #ffffff;
-                color: #1f2328;
-                font-family: 'Segoe UI', Arial, sans-serif;
-                font-size: 9.5pt;
-            }
-            QComboBox {
-                background-color: #f6f8fa;
-                border: 1px solid #d0d7de;
-                border-radius: 4px;
-                padding: 4px 8px;
-                color: #1f2328;
-                min-width: 130px;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #ffffff;
-                border: 1px solid #d0d7de;
-                selection-background-color: #0969da;
-                selection-color: #ffffff;
-                color: #1f2328;
-            }
-            QLineEdit {
-                background-color: #ffffff;
-                border: 1px solid #d0d7de;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #1f2328;
-            }
-            QLineEdit:focus {
-                border: 1px solid #0969da;
-            }
-            QPushButton {
-                background-color: #f6f8fa;
-                border: 1px solid #d0d7de;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-                color: #1f2328;
-            }
-            QPushButton:hover {
-                background-color: #f3f4f6;
-            }
-            QPushButton#sendBtn {
-                background-color: #0969da;
-                border: none;
-                color: #ffffff;
-            }
-            QPushButton#sendBtn:hover {
-                background-color: #1a7fec;
-            }
-            QPushButton#sendBtn:disabled {
-                background-color: #8cc2f7;
-                color: #ffffff;
-            }
-            QTextBrowser {
-                background-color: #ffffff;
-                border: 1px solid #d0d7de;
-                border-radius: 8px;
-                padding: 8px;
-            }
-        """)
-
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-
-        # Top Control Bar
-        top_bar = QtWidgets.QHBoxLayout()
+def get_viewer_session_context(viewer):
+    """
+    Extracts high-level information about the active visualizer state (metadata keys, 
+    number of nodes, groups, clusters, reference sequence) to guide the LLM agent.
+    """
+    import numpy as np
+    lines = []
+    lines.append("\n--- ACTIVE SSN VIEWER STATE ---")
+    
+    # 1. Node count
+    n_nodes = getattr(viewer, 'n_nodes', 0)
+    lines.append(f"Number of Nodes: {n_nodes}")
+    
+    # 2. Reference sequence
+    ref_seq = getattr(viewer, 'resolved_ref_full', None)
+    if ref_seq:
+        lines.append(f"Active Reference Sequence: {ref_seq}")
         
-        backend_label = QtWidgets.QLabel("Model:")
-        backend_label.setStyleSheet("font-weight: bold; color: #1f2328;")
-        top_bar.addWidget(backend_label)
-
-        self.backend_combo = QtWidgets.QComboBox()
-        self.backend_combo.addItems(["Deactivated", "API Server", "Local LLM"])
-        self.backend_combo.currentIndexChanged.connect(self.on_backend_changed)
-        top_bar.addWidget(self.backend_combo)
-
-        top_bar.addStretch()
-
-        self.clear_btn = QtWidgets.QPushButton("Clear")
-        self.clear_btn.setToolTip("Clear chat history and context memory")
-        self.clear_btn.clicked.connect(self.clear_history)
-        top_bar.addWidget(self.clear_btn)
-
-        layout.addLayout(top_bar)
-
-        # Status indicator line
-        status_layout = QtWidgets.QHBoxLayout()
-        self.status_label = QtWidgets.QLabel("Status: Deactivated")
-        self.status_label.setStyleSheet("color: #57606a; font-size: 8.5pt;")
-        status_layout.addWidget(self.status_label)
-        layout.addLayout(status_layout)
-
-        # Chat history display area
-        self.chat_display = QtWidgets.QTextBrowser()
-        self.chat_display.setOpenExternalLinks(True)
-        layout.addWidget(self.chat_display)
-
-        # Welcome message
-        self.append_system_msg("Welcome to Vispy SSN Agent! Select a model backend above to begin.")
-
-        # Bottom Input Area
-        input_layout = QtWidgets.QHBoxLayout()
-        self.input_field = QtWidgets.QLineEdit()
-        self.input_field.setPlaceholderText("Ask Agent a question or command...")
-        self.input_field.returnPressed.connect(self.send_query)
-        input_layout.addWidget(self.input_field)
-
-        self.send_btn = QtWidgets.QPushButton("Send")
-        self.send_btn.setObjectName("sendBtn")
-        self.send_btn.clicked.connect(self.send_query)
-        input_layout.addWidget(self.send_btn)
-
-        layout.addLayout(input_layout)
-
-    def update_backend_ui_from_state(self):
-        loaded = getattr(self.viewer, 'llm_loaded', False)
-        if not loaded:
-            self.backend_combo.setCurrentIndex(0)
-            self.status_label.setText("Status: Deactivated")
-            self.input_field.setEnabled(False)
-            self.send_btn.setEnabled(False)
-        else:
-            backend = getattr(self.viewer, 'llm_backend', None)
-            model_name = getattr(self.viewer, 'llm_model_name', "Unknown")
-            if backend == "server":
-                self.backend_combo.setCurrentIndex(1)
-                self.status_label.setText(f"Status: Active Server ({model_name})")
-            elif backend == "gguf":
-                self.backend_combo.setCurrentIndex(2)
-                self.status_label.setText(f"Status: Active Local GGUF ({model_name})")
-            self.input_field.setEnabled(True)
-            self.send_btn.setEnabled(True)
-
-    def on_backend_changed(self, index):
-        if index == 0:
-            deactivate_assistant(self.viewer, quiet=True)
-        elif index == 1:
-            activate_assistant(self.viewer, force_backend="api", quiet=True)
-        elif index == 2:
-            activate_assistant(self.viewer, force_backend="local", quiet=True)
-        self.update_backend_ui_from_state()
-
-    def clear_history(self):
-        self.chat_display.clear()
-        if hasattr(self.viewer, 'llm_history'):
-            self.viewer.llm_history = []
-        self.append_system_msg("Chat history and context memory cleared.")
-
-    def append_system_msg(self, msg):
-        html = f"""
-        <table width="100%">
-            <tr>
-                <td align="center">
-                    <table bgcolor="#f6f8fa" style="border: 1px solid #d0d7de; border-radius: 4px;">
-                        <tr>
-                            <td style="color: #57606a; font-size: 8.5pt; padding: 3px 8px; font-family: 'Segoe UI', Arial, sans-serif;">
-                                {msg}
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
-        """
-        self.chat_display.append(html)
-
-    def append_user_msg(self, msg):
-        msg_escaped = msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-        html = f"""
-        <table width="100%" style="margin: 4px 0;">
-            <tr>
-                <td align="right">
-                    <table bgcolor="#0969da" style="border-radius: 10px;">
-                        <tr>
-                            <td style="color: #ffffff; padding: 8px 12px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 9.5pt; text-align: left;">
-                                {msg_escaped}
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
-        """
-        self.chat_display.append(html)
-
-    def append_agent_msg(self, explanation, commands):
-        exp_escaped = explanation.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-        cmd_html = ""
-        if commands:
-            cmd_escaped = commands.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-            cmd_html = f"""
-            <table width="100%" bgcolor="#ffffff" style="border: 1px solid #d0d7de; border-radius: 5px; margin-top: 6px;">
-                <tr>
-                    <td style="padding: 6px 10px; font-family: Consolas, 'Courier New', monospace; font-size: 9pt; color: #0969da; line-height: 1.3;">
-                        <b>Executed Command(s):</b><br>{cmd_escaped}
-                    </td>
-                </tr>
-            </table>
-            """
-        
-        html = f"""
-        <table width="100%" style="margin: 4px 0;">
-            <tr>
-                <td align="left">
-                    <table bgcolor="#f6f8fa" style="border: 1px solid #d0d7de; border-radius: 10px;">
-                        <tr>
-                            <td style="color: #1f2328; padding: 8px 12px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 9.5pt; text-align: left;">
-                                {exp_escaped}
-                                {cmd_html}
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
-        """
-        self.chat_display.append(html)
-
-    def append_error_msg(self, err_msg):
-        err_escaped = err_msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-        html = f"""
-        <table width="100%">
-            <tr>
-                <td align="center">
-                    <table bgcolor="#ffebe9" style="border: 1px solid #ffc1c0; border-radius: 8px;">
-                        <tr>
-                            <td style="color: #cf222e; padding: 6px 12px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 9.5pt; text-align: left;">
-                                <b>Error:</b> {err_escaped}
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
-        """
-        self.chat_display.append(html)
-
-    def send_query(self):
-        query = self.input_field.text().strip()
-        if not query:
-            return
-        
-        if not getattr(self.viewer, 'llm_loaded', False):
-            self.append_error_msg("LLM is not loaded. Please select a model backend first.")
-            return
-
-        prompt_path = os.path.join("commands", "assist_resource", "system_prompt.md")
-        if not os.path.exists(prompt_path):
-            self.append_error_msg(f"System prompt file missing at {prompt_path}")
-            return
-        
-        try:
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                system_prompt = f.read()
-        except Exception as e:
-            self.append_error_msg(f"Could not read prompt file: {e}")
-            return
-
-        # Disable controls during thinking phase
-        self.input_field.setEnabled(False)
-        self.send_btn.setEnabled(False)
-        self.backend_combo.setEnabled(False)
-        self.clear_btn.setEnabled(False)
-
-        model_name = getattr(self.viewer, 'llm_model_name', "LLM")
-        self.status_label.setText(f"Status: Thinking ({model_name})...")
-        if hasattr(self.viewer, 'console_text'):
-            self.viewer.console_text.text = "Agent: Translating query..."
-            if hasattr(self.viewer, 'update_console_background'):
-                self.viewer.update_console_background()
-
-        self.append_user_msg(query)
-        self.input_field.clear()
-
-        # Prepare background arguments
-        backend = self.viewer.llm_backend
-        url = getattr(self.viewer, 'llm_url', None)
-        model_name = self.viewer.llm_model_name
-        temperature = getattr(self.viewer, 'llm_temperature', 0.0)
-        api_key = getattr(self.viewer, 'llm_api_key', None)
-        gguf_model = getattr(self.viewer, 'llm_model', None)
-        
-        if not hasattr(self.viewer, 'llm_history'):
-            self.viewer.llm_history = []
-        history = list(self.viewer.llm_history)
-
-        # Launch background thread
-        self.worker = AgentWorker(
-            backend, url, model_name, system_prompt, query, history,
-            temperature, api_key, gguf_model
-        )
-        self.worker.finished.connect(lambda res, err: self.on_worker_finished(query, res, err))
-        self.worker.start()
-
-    def on_worker_finished(self, query, translated_output, error_msg):
-        # Re-enable controls
-        self.input_field.setEnabled(True)
-        self.send_btn.setEnabled(True)
-        self.backend_combo.setEnabled(True)
-        self.clear_btn.setEnabled(True)
-        self.input_field.setFocus()
-        
-        self.update_backend_ui_from_state()
-
-        if error_msg:
-            self.append_error_msg(error_msg)
-            if hasattr(self.viewer, 'console_text'):
-                self.viewer.console_text.text = f"Agent Error: {error_msg}"
-                if hasattr(self.viewer, 'update_console_background'):
-                    self.viewer.update_console_background()
-            return
-
-        # Parse translated commands and comments
-        cmd_lines = []
-        explanation_lines = []
-        in_code_block = False
-        
-        for line in translated_output.split("\n"):
-            line_strip = line.strip()
-            if not line_strip:
-                continue
-            if line_strip.startswith("```"):
-                in_code_block = not in_code_block
-                continue
-            if in_code_block:
-                cmd_lines.append(line_strip)
-            else:
-                lower_line = line_strip.lower()
-                if lower_line.startswith("explanation:") or lower_line.startswith("comment:") or line_strip.startswith("#"):
-                    explanation = line_strip
-                    if lower_line.startswith("explanation:"):
-                        explanation = line_strip[12:].strip()
-                    elif lower_line.startswith("comment:"):
-                        explanation = line_strip[8:].strip()
-                    elif line_strip.startswith("#"):
-                        explanation = line_strip[1:].strip()
-                    if explanation:
-                        explanation_lines.append(explanation)
-                elif not lower_line.startswith("input:") and not lower_line.startswith("output:"):
-                    clean_line = line_strip.strip("`'")
-                    if clean_line:
-                        cmd_lines.append(clean_line)
-
-        explanation_str = "\n".join(explanation_lines) if explanation_lines else "Command executed successfully."
-        commands_str = "\n".join(cmd_lines)
-
-        # Update viewer LLM history
-        if not hasattr(self.viewer, 'llm_history'):
-            self.viewer.llm_history = []
-        
-        self.viewer.llm_history.append({"role": "user", "content": query})
-        if commands_str:
-            self.viewer.llm_history.append({"role": "assistant", "content": commands_str})
-        else:
-            self.viewer.llm_history.append({"role": "assistant", "content": f"Explanation: {explanation_str}"})
-        self.viewer.llm_history = self.viewer.llm_history[-6:]
-
-        # Append response to UI
-        self.append_agent_msg(explanation_str, commands_str)
-
-        # Run commands on main thread
-        if cmd_lines:
-            for cmd in cmd_lines:
-                if hasattr(self.viewer, 'console_text'):
-                    self.viewer.console_text.text = f"Running Agent: {cmd}"
-                    if hasattr(self.viewer, 'update_console_background'):
-                        self.viewer.update_console_background()
-                self.viewer.process_command(cmd)
-        else:
-            if hasattr(self.viewer, 'console_text'):
-                self.viewer.console_text.text = "Agent finished processing"
-                if hasattr(self.viewer, 'update_console_background'):
-                    self.viewer.update_console_background()
-
-def inject_agent_panel(viewer, show_sidebar=True):
-    if not hasattr(viewer, 'tab_widget'):
-        return None
-
-    tab_idx = -1
-    for idx in range(viewer.tab_widget.count()):
-        if viewer.tab_widget.tabText(idx) == "Agent":
-            tab_idx = idx
-            break
-
-    if tab_idx == -1:
-        panel = AgentPanel(viewer)
-        viewer.tab_widget.addTab(panel, "Agent")
-        tab_idx = viewer.tab_widget.count() - 1
-        viewer.agent_panel = panel
+    # 3. Selection
+    selected_indices = getattr(viewer, 'selected_indices', [])
+    if selected_indices:
+        lines.append(f"Current Selection: {len(selected_indices)} nodes selected (accessible via $sele$)")
     else:
-        panel = viewer.tab_widget.widget(tab_idx)
-        if hasattr(panel, 'update_backend_ui_from_state'):
-            panel.update_backend_ui_from_state()
+        lines.append("Current Selection: No nodes currently selected")
+        
+    # 4. Available Metadata keys
+    metadata = getattr(viewer, 'metadata', {})
+    if metadata:
+        lines.append("Available Metadata Properties:")
+        for key, prop_data in metadata.items():
+            prop_type = prop_data.get("type", "text")
+            values = prop_data.get("values")
+            val_desc = ""
+            if values is not None and len(values) > 0:
+                if prop_type == "number":
+                    arr = np.asarray(values)
+                    valid_vals = arr[~np.isnan(arr)]
+                    if len(valid_vals) > 0:
+                        val_desc = f" (min: {float(min(valid_vals)):.1f}, max: {float(max(valid_vals)):.1f})"
+                else:
+                    unique_vals = list(set([str(v) for v in values if v is not None and str(v).strip() != ""]))
+                    if len(unique_vals) > 0:
+                        sample = ", ".join(unique_vals[:5])
+                        val_desc = f" (e.g., {sample})"
+            lines.append(f"  - {key}: type={prop_type}{val_desc}")
+            
+    # 5. Topology Clusters
+    cluster_labels = getattr(viewer, 'cluster_labels', None)
+    if cluster_labels is not None:
+        unique_clusters = np.unique(cluster_labels)
+        valid_clusters = [c for c in unique_clusters if str(c).lower() not in ["noise", "none", "-1", "nan"]]
+        if valid_clusters:
+            lines.append(f"Available Clusters: {', '.join(map(str, valid_clusters[:15]))}" + 
+                         ("..." if len(valid_clusters) > 15 else ""))
+            
+    # 6. Custom Groups
+    group_labels = getattr(viewer, 'group_labels', None)
+    if group_labels:
+        unique_groups = set()
+        for g_set in group_labels:
+            if isinstance(g_set, set):
+                unique_groups.update(g_set)
+        if unique_groups:
+            lines.append(f"Defined Custom Groups: {', '.join(sorted(unique_groups))}")
+            
+    lines.append("---------------------------------\n")
+    return "\n".join(lines)
 
-    viewer.tab_widget.setCurrentIndex(tab_idx)
-    if show_sidebar:
-        viewer.set_sidebar_visible(True)
-    return panel
+def run_web_agent_query(viewer, query):
+    if not getattr(viewer, 'llm_loaded', False):
+        viewer.broadcast_event({"type": "agent_error", "error": "LLM is not loaded. Please select a model backend first."})
+        return
+
+    prompt_path = os.path.join("web_ui", "agent_resource", "system_prompt.md")
+    if not os.path.exists(prompt_path):
+        viewer.broadcast_event({"type": "agent_error", "error": f"System prompt file missing at {prompt_path}"})
+        return
+    
+    try:
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            system_prompt = f.read()
+    except Exception as e:
+        viewer.broadcast_event({"type": "agent_error", "error": f"Could not read prompt file: {e}"})
+        return
+
+    # Inject the visualizer state context dynamically into the LLM system prompt
+    system_prompt += get_viewer_session_context(viewer)
+
+    # Broadcast thinking status to browser
+    model_name = getattr(viewer, 'llm_model_name', "LLM")
+    viewer.broadcast_event({"type": "agent_thinking", "model_name": model_name})
+
+    # Prepare background arguments
+    backend = viewer.llm_backend
+    url = getattr(viewer, 'llm_url', None)
+    model_name = viewer.llm_model_name
+    temperature = getattr(viewer, 'llm_temperature', 0.0)
+    api_key = getattr(viewer, 'llm_api_key', None)
+    gguf_model = getattr(viewer, 'llm_model', None)
+    
+    if not hasattr(viewer, 'llm_history'):
+        viewer.llm_history = []
+    if not hasattr(viewer, '_cacheable_attrs'):
+        viewer._cacheable_attrs = set()
+    viewer._cacheable_attrs.add("llm_history")
+    
+    # Filter history to only include 'role' and 'content' for API request
+    history = [{"role": msg["role"], "content": msg["content"]} for msg in viewer.llm_history]
+
+    # Launch background thread
+    viewer._web_agent_worker = AgentWorker(
+        backend, url, model_name, system_prompt, query, history,
+        temperature, api_key, gguf_model
+    )
+    viewer._web_agent_worker.finished.connect(
+        lambda res, tokens, err: on_web_worker_finished(viewer, query, res, tokens, err)
+    )
+    viewer._web_agent_worker.start()
+
+class RefinementWorker(QtCore.QThread):
+    finished = QtCore.pyqtSignal(str, str, str) # Emits: (refined_explanation, tokens_json, error_message)
+    
+    def __init__(self, backend, url, model_name, user_query, commands, terminal_output, temperature, api_key, gguf_model):
+        super().__init__()
+        self.backend = backend
+        self.url = url
+        self.model_name = model_name
+        self.user_query = user_query
+        self.commands = commands
+        self.terminal_output = terminal_output
+        self.temperature = temperature
+        self.api_key = api_key
+        self.gguf_model = gguf_model
+        
+    def run(self):
+        try:
+            refinement_prompt = (
+                "You are a helpful biological assistant.\n"
+                "You have just executed the following visualizer commands on behalf of the user:\n"
+                f"```\n{self.commands}\n```\n\n"
+                "The commands printed the following output in the visualizer terminal:\n"
+                f"```\n{self.terminal_output}\n```\n\n"
+                f"The user's original request was: \"{self.user_query}\"\n\n"
+                "Write a clear, friendly, and concise response explaining the results and answering their question directly. "
+                "Do NOT output any commands or repeat 'Explanation:'. Just write the direct answer."
+            )
+            
+            res_dict = None
+            if self.backend == "server":
+                res_dict = call_api(self.url, self.model_name, "You are a helpful biological assistant.", refinement_prompt, history=None, temperature=self.temperature, api_key=self.api_key)
+            elif self.backend == "gguf":
+                res_dict = call_gguf(self.gguf_model, "You are a helpful biological assistant.", refinement_prompt, history=None, temperature=self.temperature)
+            
+            if not res_dict or not res_dict.get("content"):
+                self.finished.emit("", "", "No response from refinement.")
+            else:
+                tokens_json = json.dumps(res_dict.get("tokens", {}))
+                self.finished.emit(res_dict["content"], tokens_json, "")
+        except Exception as e:
+            self.finished.emit("", "", str(e))
+
+def save_and_broadcast_agent_response(viewer, query, explanation, commands, terminal_output, tokens_json):
+    if not hasattr(viewer, 'llm_history'):
+        viewer.llm_history = []
+    if not hasattr(viewer, '_cacheable_attrs'):
+        viewer._cacheable_attrs = set()
+    viewer._cacheable_attrs.add("llm_history")
+    
+    tokens = json.loads(tokens_json) if tokens_json else None
+    
+    # Store complete log including commands/output in history content to maintain full context
+    content_payload = explanation
+    if commands:
+        content_payload += f"\n\nCommands executed:\n```\n{commands}\n```"
+    if terminal_output:
+        content_payload += f"\n\nTerminal output:\n```\n{terminal_output}\n```"
+        
+    viewer.llm_history.append({"role": "user", "content": query})
+    viewer.llm_history.append({
+        "role": "assistant",
+        "content": content_payload,
+        "explanation": explanation,
+        "commands": commands,
+        "terminal_output": terminal_output,
+        "tokens": tokens
+    })
+    viewer.llm_history = viewer.llm_history[-10:]
+    
+    viewer.broadcast_event({
+        "type": "agent_response",
+        "query": query,
+        "explanation": explanation,
+        "commands": commands,
+        "terminal_output": terminal_output,
+        "tokens": tokens,
+        "llm_history": viewer.llm_history
+    })
+
+def start_refinement_worker(viewer, query, original_explanation, commands, terminal_output, initial_tokens_json):
+    model_name = getattr(viewer, 'llm_model_name', "LLM")
+    viewer.broadcast_event({"type": "agent_thinking", "model_name": f"{model_name} (Analyzing results)"})
+    
+    backend = viewer.llm_backend
+    url = getattr(viewer, 'llm_url', None)
+    temperature = getattr(viewer, 'llm_temperature', 0.0)
+    api_key = getattr(viewer, 'llm_api_key', None)
+    gguf_model = getattr(viewer, 'llm_model', None)
+    
+    viewer._refinement_worker = RefinementWorker(
+        backend, url, model_name, query, commands, terminal_output, 
+        temperature, api_key, gguf_model
+    )
+    
+    def on_refinement_finished(refined_explanation, refinement_tokens_json, err):
+        final_explanation = refined_explanation if not err and refined_explanation else original_explanation
+        
+        combined_tokens_json = initial_tokens_json
+        if refinement_tokens_json:
+            try:
+                t1 = json.loads(initial_tokens_json) if initial_tokens_json else {}
+                t2 = json.loads(refinement_tokens_json)
+                combined = {
+                    "prompt": t1.get("prompt", 0) + t2.get("prompt", 0),
+                    "completion": t1.get("completion", 0) + t2.get("completion", 0),
+                    "total": t1.get("total", 0) + t2.get("total", 0)
+                }
+                combined_tokens_json = json.dumps(combined)
+            except Exception:
+                pass
+                
+        save_and_broadcast_agent_response(viewer, query, final_explanation, commands, terminal_output, combined_tokens_json)
+        
+    viewer._refinement_worker.finished.connect(on_refinement_finished)
+    viewer._refinement_worker.start()
+
+def on_web_worker_finished(viewer, query, translated_output, tokens_json, error_msg):
+    if error_msg:
+        viewer.broadcast_event({"type": "agent_error", "error": error_msg})
+        return
+
+    # Parse translated commands and comments
+    cmd_lines = []
+    explanation_lines = []
+    in_code_block = False
+    
+    for line in translated_output.split("\n"):
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+        if line_strip.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            cmd_lines.append(line_strip)
+        else:
+            lower_line = line_strip.lower()
+            if lower_line.startswith("explanation:") or lower_line.startswith("comment:") or line_strip.startswith("#"):
+                explanation = line_strip
+                if lower_line.startswith("explanation:"):
+                    explanation = line_strip[12:].strip()
+                elif lower_line.startswith("comment:"):
+                    explanation = line_strip[8:].strip()
+                elif line_strip.startswith("#"):
+                    explanation = line_strip[1:].strip()
+                if explanation:
+                    explanation_lines.append(explanation)
+            elif not lower_line.startswith("input:") and not lower_line.startswith("output:"):
+                clean_line = line_strip.strip("`'")
+                if clean_line:
+                    cmd_lines.append(clean_line)
+
+    explanation_str = "\n".join(explanation_lines) if explanation_lines else "Command executed successfully."
+    commands_str = "\n".join(cmd_lines)
+
+    # Run commands on main thread while capturing standard output
+    import io
+    import contextlib
+    
+    captured_outputs = []
+    if cmd_lines:
+        for cmd in cmd_lines:
+            f = io.StringIO()
+            with contextlib.redirect_stdout(f):
+                try:
+                    viewer.process_command(cmd)
+                except Exception as e:
+                    print(f"Error executing command '{cmd}': {e}")
+            output = f.getvalue().strip()
+            if output:
+                captured_outputs.append(output)
+                
+    terminal_output = "\n".join(captured_outputs) if captured_outputs else ""
+
+    if not terminal_output:
+        # Save and broadcast immediately
+        save_and_broadcast_agent_response(viewer, query, explanation_str, commands_str, "", tokens_json)
+    else:
+        # Perform secondary Turn refinement utilizing captured outputs
+        start_refinement_worker(viewer, query, explanation_str, commands_str, terminal_output, tokens_json)
 
 def run(viewer, args):
-    # Running 'agent' from CLI launches and focuses the Agent tab in the side panel
-    inject_agent_panel(viewer, show_sidebar=True)
+    # Monkeypatch get_initial_web_state to inject llm_history dynamically
+    if not hasattr(viewer, '_get_web_state_patched'):
+        original_get_web_state = viewer.get_initial_web_state
+        
+        def patched_get_web_state():
+            state = original_get_web_state()
+            if isinstance(state, dict):
+                state = dict(state)
+                state["llm_history"] = getattr(viewer, 'llm_history', [])
+            return state
+            
+        viewer.get_initial_web_state = patched_get_web_state
+        viewer._get_web_state_patched = True
+
+    # Dynamically register the Agent button in the side panel
+    if hasattr(viewer, 'add_sidebar_button'):
+        viewer.add_sidebar_button(
+            name="agentBtn",
+            label="🤖 Agent",
+            callback=viewer.open_agent_ui,
+            tooltip="Open AI Agent Chat Console in browser"
+        )
+        if not hasattr(viewer, 'sidebar_buttons_to_persist'):
+            viewer.sidebar_buttons_to_persist = []
+        if "agent" not in viewer.sidebar_buttons_to_persist:
+            viewer.sidebar_buttons_to_persist.append("agent")
+
+    # If --register-only is specified, return early without opening browser
+    if args and args[0] == '--register-only':
+        return
+
+    import webbrowser
+    webbrowser.open("http://localhost:8000/agent.html")
     if hasattr(viewer, 'console_text'):
-        viewer.console_text.text = "Agent Panel Activated"
+        viewer.console_text.text = "Agent UI opened at http://localhost:8000/agent.html"
         if hasattr(viewer, 'update_console_background'):
             viewer.update_console_background()

@@ -1,11 +1,15 @@
-# User-specified files
-Documentations/AGENT.md
+# User-specified folders
 Results/
 Input_Files/
 Embeddings/
 Cache_Files/
 manual_tools/
 VR_Viewer/
+
+# User-specified files
+web_ui/agent_resource/api_secrets.json
+web_ui/agent_resource/evaluate_agent.py
+*.gguf
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -226,6 +230,3 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
-# LLM Assistant Private Credentials
-commands/assist_resource/api_secrets.json

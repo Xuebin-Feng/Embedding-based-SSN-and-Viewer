@@ -11,6 +11,7 @@ import numpy as np
 import importlib
 from collections import deque
 import math
+import queue
 from vispy import scene, app
 from PyQt6 import QtWidgets, QtCore
 import SSN_Config as cfg
@@ -25,6 +26,7 @@ import Command_Engine
 # =========================================================================
 CUSTOM_ATTRIBUTES_INIT = {
     # Add your custom attributes here:
+    "sidebar_buttons_to_persist": []
 }
 
 # Fix High-DPI scaling
@@ -39,8 +41,12 @@ class HUDDisplay:
         self.visible = False
 
     def show(self, text):
+        w, h = self.viewer.canvas.size
+        panel_visible = hasattr(self.viewer, 'right_panel') and self.viewer.right_panel.isVisible()
+        panel_w = getattr(self.viewer, '_panel_w', 120) if panel_visible else 0
+        pos = self.pos_fn((w - panel_w, h))
+
         if self.text_visual is None:
-            pos = self.pos_fn(self.viewer.canvas.size)
             self.text_visual = scene.visuals.Text(
                 text=text,
                 bold=True,
@@ -53,6 +59,7 @@ class HUDDisplay:
             )
         else:
             self.text_visual.text = text
+            self.text_visual.pos = pos
             self.text_visual.visible = True
         self.visible = True
 
@@ -64,7 +71,10 @@ class HUDDisplay:
 
     def update_position(self):
         if self.text_visual is not None and self.visible:
-            self.text_visual.pos = self.pos_fn(self.viewer.canvas.size)
+            w, h = self.viewer.canvas.size
+            panel_visible = hasattr(self.viewer, 'right_panel') and self.viewer.right_panel.isVisible()
+            panel_w = getattr(self.viewer, '_panel_w', 120) if panel_visible else 0
+            self.text_visual.pos = self.pos_fn((w - panel_w, h))
 
     def on_node_clicked(self, node_idx):
         """Override in subclasses to handle left-click updates."""
@@ -343,33 +353,27 @@ class MainViewer:
         self.position_slider_overlay()
         self.slider_overlay.show()
         
-        # --- 6. Set up MainWindow & Splitter Layout ---
+        # --- 6. Set up MainWindow & WebServer ---
+        self._panel_w = 180
         self.main_window = QtWidgets.QMainWindow()
         self.main_window.setWindowTitle("Sequence Similarity Network Viewer")
-        self.main_window.resize(1400, 900)
+        self.main_window.resize(1200, 800)
+        self.main_window.setMinimumWidth(self._panel_w)
         
-        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        self.main_window.setCentralWidget(self.splitter)
+        # Set the Vispy canvas directly as the central widget
+        self.main_window.setCentralWidget(self.canvas.native)
         
-        # Add the native Vispy Canvas on the left
-        self.splitter.addWidget(self.canvas.native)
-        
-        # Collapsible Right Panel Container
-        self.right_panel = QtWidgets.QWidget()
+        # Collapsible Right Panel Container (overlay on the canvas.native)
+        self.right_panel = QtWidgets.QWidget(self.canvas.native)
         self.right_panel.setObjectName("rightPanel")
         right_panel_layout = QtWidgets.QVBoxLayout(self.right_panel)
-        right_panel_layout.setContentsMargins(0, 0, 0, 0)
-        right_panel_layout.setSpacing(0)
+        right_panel_layout.setContentsMargins(10, 20, 10, 20)
+        right_panel_layout.setSpacing(15)
+        right_panel_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignHCenter)
         
-        # The QTabWidget that hosts dynamic tabs (no header widget, no title)
-        self.tab_widget = QtWidgets.QTabWidget()
-        self.tab_widget.setObjectName("tabWidget")
-        right_panel_layout.addWidget(self.tab_widget)
-        
-        # Add the right panel to the splitter
-        self.splitter.addWidget(self.right_panel)
-        self.splitter.setSizes([1000, 400])
-        self.splitter.setHandleWidth(2)
+        # Stretch at the bottom to keep dynamic buttons at the top
+        self.right_panel_layout = right_panel_layout
+        self.right_panel_layout.addStretch()
         
         # Single floating toggle button on the canvas.native to collapse/expand sidebar
         self.toggle_sidebar_btn = QtWidgets.QPushButton(">>", self.canvas.native)
@@ -384,15 +388,9 @@ class MainViewer:
             QMainWindow {
                 background-color: #f7f7f7;
             }
-            QSplitter::handle {
-                background-color: #e2e2e2;
-                width: 2px;
-            }
             QWidget#rightPanel {
-                background-color: #ffffff;
-                border-left: 1px solid #e2e2e2;
-                border-bottom-right-radius: 12px;
-                border-top-right-radius: 12px;
+                background-color: rgba(255, 255, 255, 0.95);
+                border-left: 1px solid #dcdcdc;
             }
             QPushButton#toggleSidebarBtn {
                 background-color: #ffffff;
@@ -408,49 +406,42 @@ class MainViewer:
             QPushButton#toggleSidebarBtn:pressed {
                 background-color: #e5e5e5;
             }
-            QTabWidget {
-                border: none;
-            }
-            QTabWidget::panel {
-                border: none;
+            QWidget#rightPanel QPushButton {
                 background-color: #ffffff;
-                border-bottom-right-radius: 12px;
-                border-top-right-radius: 12px;
-            }
-            QTabBar::tab {
-                background-color: #f0f0f0;
-                border: 1px solid #e2e2e2;
-                border-bottom-color: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                padding: 6px 12px;
-                margin-right: 2px;
-                color: #555555;
-            }
-            QTabBar::tab:selected {
-                background-color: #ffffff;
-                border-bottom-color: #ffffff;
+                border: 1px solid #dcdcdc;
+                border-radius: 6px;
                 font-weight: bold;
-                color: #000000;
+                color: #0969da;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                font-size: 10pt;
+                padding-left: 10px;
+                padding-right: 10px;
             }
-            QTabBar::tab:hover:!selected {
-                background-color: #e8e8e8;
+            QWidget#rightPanel QPushButton:hover {
+                background-color: #f0f8ff;
+                border-color: #0969da;
+            }
+            QWidget#rightPanel QPushButton:pressed {
+                background-color: #e2f0fe;
             }
         """)
         
+        # Initialize thread-safe QtCommunicator for server commands
+        from web_ui import Web_Server
+        self.communicator = Web_Server.QtCommunicator(self)
+        
+        # Initialize background WebServer
+        self.web_server = None
+        self.start_web_server()
+        
+        # Run persistent sidebar button registration commands
+        if getattr(self, 'sidebar_buttons_to_persist', None):
+            for cmd_name in self.sidebar_buttons_to_persist:
+                self.process_command(f"{cmd_name} --register-only", record_history=False, silent=True)
+        
+        # Ensure the side panel is hidden at startup
         self.set_sidebar_visible(False)
         
-        # Auto-inject metadata spreadsheet if real metadata is loaded from cache
-        if getattr(self, 'metadata', None):
-            real_keys = [k for k in self.metadata.keys() if k.lower() != "length"]
-            if real_keys:
-                try:
-                    import importlib
-                    meta_cmd = importlib.import_module("commands.meta")
-                    meta_cmd.inject_spreadsheet_panel(self, show_sidebar=False)
-                except Exception as e:
-                    print(f"Warning: Could not auto-inject metadata panel: {e}")
-                    
         self.main_window.show()
         
         self._hud_timer.start()
@@ -969,6 +960,9 @@ class MainViewer:
             
         self.update_nodes()
         self.update_edges()
+        
+        # Broadcast the selection change to SSE clients
+        self.broadcast_event({"type": "selection_changed", "indices": self.selected_indices})
     
     def format_sig_figs(self, val):
         if val == 0:
@@ -989,7 +983,10 @@ class MainViewer:
     def position_slider_overlay(self):
         if hasattr(self, 'slider_overlay') and hasattr(self, 'canvas'):
             canvas_w, canvas_h = self.canvas.size
-            overlay_w = max(100, canvas_w - 220)
+            panel_visible = hasattr(self, 'right_panel') and self.right_panel.isVisible()
+            panel_w = getattr(self, '_panel_w', 120) if panel_visible else 0
+            effective_w = canvas_w - panel_w
+            overlay_w = max(100, effective_w - 220)
             overlay_h = 45
             overlay_x = 20
             overlay_y = canvas_h - overlay_h - 15
@@ -1180,7 +1177,7 @@ class MainViewer:
             parent=self.canvas.scene
         )
 
-    def process_command(self, cmd_str, record_history=True):
+    def process_command(self, cmd_str, record_history=True, silent=False):
         cmd_str = cmd_str.strip()
         if not cmd_str: return
 
@@ -1220,22 +1217,38 @@ class MainViewer:
             importlib.reload(module) 
             
             if hasattr(module, 'run'):
-                self.console_text.text = f"Running {command_name}..."
-                self.update_console_background()
+                if not silent and hasattr(self, 'console_text'):
+                    self.console_text.text = f"Running {command_name}..."
+                if not silent and hasattr(self, 'update_console_background'):
+                    self.update_console_background()
                 if hasattr(app, 'process_events'):
                     app.process_events() 
                 module.run(self, args)
-                self.update_console_background()
+                if not silent and hasattr(self, 'update_console_background'):
+                    self.update_console_background()
+                # Broadcast state update to HTML5 browser!
+                self.broadcast_event({
+                    "type": "state_updated",
+                    "visible_mask": self.visible_mask.tolist(),
+                    "selected_indices": self.selected_indices,
+                    "metadata": self.get_serializable_metadata()
+                })
             else:
-                self.console_text.text = f"Error: No 'run' in {command_name}"
-                self.update_console_background()
+                if not silent and hasattr(self, 'console_text'):
+                    self.console_text.text = f"Error: No 'run' in {command_name}"
+                if not silent and hasattr(self, 'update_console_background'):
+                    self.update_console_background()
                 
         except ModuleNotFoundError:
-            self.console_text.text = f"Unknown command: {command_name}"
-            self.update_console_background()
+            if not silent and hasattr(self, 'console_text'):
+                self.console_text.text = f"Unknown command: {command_name}"
+            if not silent and hasattr(self, 'update_console_background'):
+                self.update_console_background()
         except Exception as e:
-            self.console_text.text = f"Error: {e}"
-            self.update_console_background()
+            if not silent and hasattr(self, 'console_text'):
+                self.console_text.text = f"Error: {e}"
+            if not silent and hasattr(self, 'update_console_background'):
+                self.update_console_background()
             print(f"Command Error: {e}")
             import traceback
             traceback.print_exc()
@@ -1512,11 +1525,15 @@ class MainViewer:
         """Updates the zoom indicator, hidden nodes count, and maintains the tooltip pixel gap."""
         cfg_hud = self.hud_layout
         
+        panel_visible = hasattr(self, 'right_panel') and self.right_panel.isVisible()
+        panel_w = getattr(self, '_panel_w', 120) if panel_visible else 0
+        effective_canvas_w = self.canvas.size[0] - panel_w
+        
         # 1. Update Zoom Indicator (Visible World Width)
         if hasattr(self, 'zoom_text'):
             visible_width = self.view.camera.rect.width
             self.zoom_text.text = f"View Width: {visible_width:.1f}"
-            self.zoom_text.pos = (self.canvas.size[0] - cfg_hud["zoom_x_offset"], self.canvas.size[1] - cfg_hud["zoom_y_offset"]) 
+            self.zoom_text.pos = (effective_canvas_w - cfg_hud["zoom_x_offset"], self.canvas.size[1] - cfg_hud["zoom_y_offset"]) 
 
         # 2. Update Hidden Nodes Indicator
         if hasattr(self, 'hidden_text') and hasattr(self, 'visible_mask'):
@@ -1526,7 +1543,7 @@ class MainViewer:
                 self.hidden_text.color = 'red'
             else:
                 self.hidden_text.color = 'gray'
-            self.hidden_text.pos = (self.canvas.size[0] - cfg_hud["hidden_x_offset"], self.canvas.size[1] - cfg_hud["hidden_y_offset"])
+            self.hidden_text.pos = (effective_canvas_w - cfg_hud["hidden_x_offset"], self.canvas.size[1] - cfg_hud["hidden_y_offset"])
 
         # 3. Update Tooltip Distance
         if getattr(self, 'selected_node_idx', None) is not None and getattr(self, 'tooltip', None) and self.tooltip.text != "":
@@ -1550,9 +1567,17 @@ class MainViewer:
             self.reposition_expand_btn()
 
     def reposition_expand_btn(self):
-        if hasattr(self, 'toggle_sidebar_btn') and hasattr(self, 'canvas'):
+        if hasattr(self, 'canvas'):
             w, h = self.canvas.size
-            self.toggle_sidebar_btn.setGeometry(w - 40, 10, 30, 30)
+            panel_visible = hasattr(self, 'right_panel') and self.right_panel.isVisible()
+            panel_w = getattr(self, '_panel_w', 120)
+            if hasattr(self, 'right_panel'):
+                self.right_panel.setGeometry(w - panel_w, 0, panel_w, h)
+            if hasattr(self, 'toggle_sidebar_btn'):
+                if panel_visible:
+                    self.toggle_sidebar_btn.setGeometry(w - panel_w - 40, 10, 30, 30)
+                else:
+                    self.toggle_sidebar_btn.setGeometry(w - 40, 10, 30, 30)
 
     def toggle_sidebar(self):
         if hasattr(self, 'right_panel'):
@@ -1560,24 +1585,95 @@ class MainViewer:
             self.set_sidebar_visible(visible)
 
     def set_sidebar_visible(self, visible):
-        has_tabs = hasattr(self, 'tab_widget') and self.tab_widget.count() > 0
-        if visible and not has_tabs:
-            return
-
         if hasattr(self, 'right_panel'):
             self.right_panel.setVisible(visible)
             if hasattr(self, 'toggle_sidebar_btn'):
-                if has_tabs:
-                    self.toggle_sidebar_btn.show()
-                    self.toggle_sidebar_btn.setText(">>" if visible else "<<")
-                else:
-                    self.toggle_sidebar_btn.hide()
-            if visible and has_tabs:
-                if hasattr(self, 'splitter'):
-                    total_w = self.splitter.width()
-                    right_w = 400
-                    self.splitter.setSizes([total_w - right_w, right_w])
+                self.toggle_sidebar_btn.setText(">>" if visible else "<<")
             self.reposition_expand_btn()
+            
+            # Immediately update the positions of HUD labels and slider
+            if hasattr(self, 'position_slider_overlay'):
+                self.position_slider_overlay()
+            if hasattr(self, '_update_hud_elements'):
+                self._update_hud_elements()
+
+    def open_metadata_ui(self):
+        import webbrowser
+        webbrowser.open("http://localhost:8000/metadata.html")
+
+    def open_agent_ui(self):
+        import webbrowser
+        webbrowser.open("http://localhost:8000/agent.html")
+
+    def add_sidebar_button(self, name, label, callback, tooltip=None):
+        if not hasattr(self, 'sidebar_buttons'):
+            self.sidebar_buttons = {}
+        
+        # If button already exists, just show it and expand the sidebar
+        if name in self.sidebar_buttons:
+            self.sidebar_buttons[name].show()
+            self.set_sidebar_visible(True)
+            return self.sidebar_buttons[name]
+        
+        btn = QtWidgets.QPushButton(label, self.right_panel)
+        btn.setObjectName(name)
+        if tooltip:
+            btn.setToolTip(tooltip)
+        btn.setFixedWidth(150)
+        btn.setFixedHeight(35)
+        btn.clicked.connect(callback)
+        
+        # Insert button in layout right before the bottom stretch spacer
+        layout = self.right_panel_layout
+        layout.insertWidget(layout.count() - 1, btn)
+        
+        self.sidebar_buttons[name] = btn
+        self.set_sidebar_visible(True)
+        return btn
+
+
+    def start_web_server(self):
+        try:
+            from web_ui import Web_Server
+            self.web_server = Web_Server.start_server(self)
+            print(f"WebServer started at http://localhost:8000")
+        except Exception as e:
+            print(f"Error starting WebServer: {e}")
+
+    def broadcast_event(self, event):
+        if hasattr(self, 'web_server') and self.web_server:
+            with self.web_server.queues_lock:
+                queues = list(self.web_server.event_queues)
+            for q in queues:
+                q.put(event)
+
+    def get_serializable_metadata(self):
+        rows = []
+        for row_idx in range(self.n_nodes):
+            row_dict = {
+                "id": row_idx,
+                "Node ID": str(self.full_headers[row_idx])
+            }
+            for key, entry in self.metadata.items():
+                val = entry["values"][row_idx]
+                if isinstance(val, (float, np.floating)) and np.isnan(val):
+                    val = ""
+                else:
+                    val = val.item() if hasattr(val, 'item') else val
+                row_dict[key] = val
+            rows.append(row_dict)
+        return rows
+
+    def get_initial_web_state(self):
+        return {
+            "rows": self.get_serializable_metadata(),
+            "columns": ["Node ID"] + [k for k in self.metadata.keys() if k.lower() != "length"],
+            "selected_indices": self.selected_indices,
+            "visible_mask": self.visible_mask.tolist(),
+            "llm_loaded": getattr(self, 'llm_loaded', False),
+            "llm_backend": getattr(self, 'llm_backend', None),
+            "llm_model_name": getattr(self, 'llm_model_name', "Unknown")
+        }
 
     def on_mouse_wheel(self, event):
         self._hud_timer.start()
