@@ -51,7 +51,12 @@ def run(viewer, args):
         Command_Engine.execute_reset(viewer, ["colors"])
         return
 
-    if not args or args[0].lower() in ['help', '-h', '--help']:
+    if not args:
+        msg = "Error: Color command requires at least one property (color, scale, or shape) or expression.\nUsage: color [EXPR_1] [COLOR_1] [xSCALE_1] [SHAPE_1]"
+        Command_Engine.print_help(viewer, msg)
+        return
+
+    if args[0].lower() in ['help', '-h', '--help']:
         print_help()
         if hasattr(viewer, 'console_text'):
             viewer.console_text.text = "Help information printed to the terminal"

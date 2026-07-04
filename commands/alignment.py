@@ -11,11 +11,8 @@ def print_help():
     Usage:
       alignment
           Opens a file explorer to select an MSA file (.fasta or .h5) manually.
-      alignment <alignment_identifier>
-          Loads the MSA file matching the identifier (index or filename query) 
-          from the Multiple Alignments folder.
-      alignment list
-          Lists all available alignments in the Multiple Alignments folder.
+      alignment [filename.fasta / filename.h5]
+          Loads the specified MSA file directly from disk.
       alignment help
           Displays this help message.
 
@@ -34,7 +31,6 @@ def run(viewer, args):
             viewer.console_text.text = "Help information printed to the terminal"
         return
 
-    # Check for list argument
     msa_dir = getattr(cfg, 'MSA_DIR', os.path.join("Input_Files", "Multiple_Alignments"))
     
     # 1. No arguments provided -> Open File Explorer for manual selection
@@ -64,72 +60,37 @@ def run(viewer, args):
         selected_file = os.path.basename(file_path)
         new_path = file_path.replace("\\", "/")
     else:
-        # Check if list is requested
-        if args[0].lower() == 'list':
-            if not os.path.exists(msa_dir):
-                msg = f"Error: MSA directory '{msa_dir}' does not exist."
-                Command_Engine.print_help(viewer, msg)
-                return
-            files = sorted([f for f in os.listdir(msa_dir) if f.endswith('.fasta') or f.endswith('.h5')])
-            if not files:
-                msg = f"No alignment files found in '{msa_dir}'."
-                Command_Engine.print_help(viewer, msg)
-                return
-            print("\nAvailable alignments:")
-            print("=====================")
-            current_base = os.path.basename(cfg.MSA_FILE) if cfg.MSA_FILE else ""
-            for i, file in enumerate(files, 1):
-                is_active = "[ACTIVE]" if file == current_base else ""
-                print(f"  {i: >2}. {file} {is_active}")
-            print("\nTo load an alignment, type: alignment <index> or alignment <filename_query>")
-            if hasattr(viewer, 'console_text'):
-                viewer.console_text.text = f"Listed {len(files)} alignments in console."
-            return
-
-        # Treat args as target identifier in cfg.MSA_DIR
-        if not os.path.exists(msa_dir):
-            msg = f"Error: MSA directory '{msa_dir}' does not exist."
-            Command_Engine.print_help(viewer, msg)
-            return
-            
-        files = sorted([f for f in os.listdir(msa_dir) if f.endswith('.fasta') or f.endswith('.h5')])
-        if not files:
-            msg = f"Error: No alignment files found in '{msa_dir}'."
-            Command_Engine.print_help(viewer, msg)
-            return
-
+        # Treat args as target direct file path
         identifier = " ".join(args).strip()
         selected_file = None
+        new_path = None
         
-        if identifier.isdigit():
-            idx = int(identifier) - 1
-            if 0 <= idx < len(files):
-                selected_file = files[idx]
-            else:
-                msg = f"Error: Index '{identifier}' is out of range. Range is 1-{len(files)}."
-                Command_Engine.print_help(viewer, msg)
-                return
+        # 1. Check if the identifier is a direct file path
+        if os.path.exists(identifier) and os.path.isfile(identifier):
+            new_path = os.path.abspath(identifier).replace("\\", "/")
+            selected_file = os.path.basename(identifier)
         else:
-            # Search by case-insensitive substring
-            matches = [f for f in files if identifier.lower() in f.lower()]
-            if not matches:
-                matches = [f for f in files if fnmatch.fnmatch(f.lower(), identifier.lower())]
-                
-            if len(matches) == 1:
-                selected_file = matches[0]
-            elif len(matches) > 1:
-                print(f"\nMultiple matches found for '{identifier}':")
-                for f in matches:
-                    print(f"  - {f}")
-                msg = "Error: Ambiguous query. Please be more specific."
-                Command_Engine.print_help(viewer, msg)
-                return
+            # 2. Check if it exists in the msa directory directly
+            path_in_dir = os.path.join(msa_dir, identifier)
+            if os.path.exists(path_in_dir) and os.path.isfile(path_in_dir):
+                new_path = os.path.abspath(path_in_dir).replace("\\", "/")
+                selected_file = os.path.basename(path_in_dir)
             else:
-                msg = f"Error: No alignments matching '{identifier}' found."
-                Command_Engine.print_help(viewer, msg)
-                return
-
-        new_path = os.path.join(msa_dir, selected_file).replace("\\", "/")
+                # 3. Try common extensions if missing (.fasta, .h5)
+                for ext in ['.fasta', '.h5']:
+                    if os.path.exists(identifier + ext) and os.path.isfile(identifier + ext):
+                        new_path = os.path.abspath(identifier + ext).replace("\\", "/")
+                        selected_file = os.path.basename(identifier + ext)
+                        break
+                    elif os.path.exists(os.path.join(msa_dir, identifier + ext)) and os.path.isfile(os.path.join(msa_dir, identifier + ext)):
+                        new_path = os.path.abspath(os.path.join(msa_dir, identifier + ext)).replace("\\", "/")
+                        selected_file = os.path.basename(os.path.join(msa_dir, identifier + ext))
+                        break
+                        
+        if not new_path:
+            msg = f"Error: Alignment file '{identifier}' not found (checked absolute, relative, and {msa_dir})."
+            Command_Engine.print_help(viewer, msg)
+            return
 
     # Load the selected alignment file
     print(f"\nAttempting to load alignment: {selected_file}...")

@@ -49,7 +49,12 @@ def print_help():
     """)
 
 def run(viewer, args):
-    if not args or args[0].lower() in ['help', '-h', '--help']:
+    if not args:
+        msg = "Error: Select command requires an expression or invert/save action.\nUsage: select [MODE] <EXPRESSION>"
+        Command_Engine.print_help(viewer, msg)
+        return
+
+    if args[0].lower() in ['help', '-h', '--help']:
         print_help()
         if hasattr(viewer, 'console_text'):
             viewer.console_text.text = "Help information printed to the terminal"

@@ -226,3 +226,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# LLM Assistant Private Credentials
+commands/assist_resource/api_secrets.json

@@ -181,7 +181,7 @@ class MainViewer:
         self.load_global_alignment()
         
         # --- 3. Setup Window & Canvas ---
-        self.canvas = scene.SceneCanvas(keys=None, show=True, title="SSN Viewer (Live)", bgcolor='white')
+        self.canvas = scene.SceneCanvas(keys=None, show=False, title="SSN Viewer (Live)", bgcolor='white')
         self.canvas.events.key_press.connect(self.on_key_press)
         self.canvas.events.resize.connect(self.on_resize)
         self.canvas.events.mouse_press.connect(self.on_mouse_press)
@@ -342,6 +342,116 @@ class MainViewer:
         
         self.position_slider_overlay()
         self.slider_overlay.show()
+        
+        # --- 6. Set up MainWindow & Splitter Layout ---
+        self.main_window = QtWidgets.QMainWindow()
+        self.main_window.setWindowTitle("Sequence Similarity Network Viewer")
+        self.main_window.resize(1400, 900)
+        
+        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.main_window.setCentralWidget(self.splitter)
+        
+        # Add the native Vispy Canvas on the left
+        self.splitter.addWidget(self.canvas.native)
+        
+        # Collapsible Right Panel Container
+        self.right_panel = QtWidgets.QWidget()
+        self.right_panel.setObjectName("rightPanel")
+        right_panel_layout = QtWidgets.QVBoxLayout(self.right_panel)
+        right_panel_layout.setContentsMargins(0, 0, 0, 0)
+        right_panel_layout.setSpacing(0)
+        
+        # The QTabWidget that hosts dynamic tabs (no header widget, no title)
+        self.tab_widget = QtWidgets.QTabWidget()
+        self.tab_widget.setObjectName("tabWidget")
+        right_panel_layout.addWidget(self.tab_widget)
+        
+        # Add the right panel to the splitter
+        self.splitter.addWidget(self.right_panel)
+        self.splitter.setSizes([1000, 400])
+        self.splitter.setHandleWidth(2)
+        
+        # Single floating toggle button on the canvas.native to collapse/expand sidebar
+        self.toggle_sidebar_btn = QtWidgets.QPushButton(">>", self.canvas.native)
+        self.toggle_sidebar_btn.setObjectName("toggleSidebarBtn")
+        self.toggle_sidebar_btn.setToolTip("Toggle sidebar panel")
+        self.toggle_sidebar_btn.setFixedWidth(30)
+        self.toggle_sidebar_btn.setFixedHeight(30)
+        self.toggle_sidebar_btn.clicked.connect(self.toggle_sidebar)
+        
+        # Apply modern premium stylesheet
+        self.main_window.setStyleSheet("""
+            QMainWindow {
+                background-color: #f7f7f7;
+            }
+            QSplitter::handle {
+                background-color: #e2e2e2;
+                width: 2px;
+            }
+            QWidget#rightPanel {
+                background-color: #ffffff;
+                border-left: 1px solid #e2e2e2;
+                border-bottom-right-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QPushButton#toggleSidebarBtn {
+                background-color: #ffffff;
+                border: 1px solid #dcdcdc;
+                border-radius: 4px;
+                font-weight: bold;
+                color: #555555;
+            }
+            QPushButton#toggleSidebarBtn:hover {
+                background-color: #f0f0f0;
+                border-color: #c0c0c0;
+            }
+            QPushButton#toggleSidebarBtn:pressed {
+                background-color: #e5e5e5;
+            }
+            QTabWidget {
+                border: none;
+            }
+            QTabWidget::panel {
+                border: none;
+                background-color: #ffffff;
+                border-bottom-right-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QTabBar::tab {
+                background-color: #f0f0f0;
+                border: 1px solid #e2e2e2;
+                border-bottom-color: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 6px 12px;
+                margin-right: 2px;
+                color: #555555;
+            }
+            QTabBar::tab:selected {
+                background-color: #ffffff;
+                border-bottom-color: #ffffff;
+                font-weight: bold;
+                color: #000000;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #e8e8e8;
+            }
+        """)
+        
+        self.set_sidebar_visible(False)
+        
+        # Auto-inject metadata spreadsheet if real metadata is loaded from cache
+        if getattr(self, 'metadata', None):
+            real_keys = [k for k in self.metadata.keys() if k.lower() != "length"]
+            if real_keys:
+                try:
+                    import importlib
+                    meta_cmd = importlib.import_module("commands.meta")
+                    meta_cmd.inject_spreadsheet_panel(self, show_sidebar=False)
+                except Exception as e:
+                    print(f"Warning: Could not auto-inject metadata panel: {e}")
+                    
+        self.main_window.show()
         
         self._hud_timer.start()
         print("\nViewer Ready. Press [ENTER] to type commands.")
@@ -899,6 +1009,8 @@ class MainViewer:
             
             if getattr(self, '_last_vis_mask_hash', None) != current_vis_hash:
                 self._last_vis_mask_hash = current_vis_hash
+                if hasattr(self, 'sync_metadata_table_visibility'):
+                    self.sync_metadata_table_visibility()
                 nodes_visible_mask = self.visible_mask[self.edges[:, 0]] & self.visible_mask[self.edges[:, 1]]
                 
                 if hasattr(self, 'edge_scores') and len(self.edge_scores) > 0:
@@ -1380,6 +1492,10 @@ class MainViewer:
                 
                 # Optionally update the HUD console text with a brief confirmation
                 self.console_text.text = f"Selected: {lbl_line1}{group_print}"
+                
+                # Sync selection to metadata spreadsheet
+                if hasattr(self, 'sync_metadata_table_selection'):
+                    self.sync_metadata_table_selection(nearest_idx)
 
                 # Update any registered HUD displays
                 for display in self.hud_displays.values():
@@ -1430,6 +1546,38 @@ class MainViewer:
         self._hud_timer.start()
         if hasattr(self, 'slider_overlay'):
             self.position_slider_overlay()
+        if hasattr(self, 'reposition_expand_btn'):
+            self.reposition_expand_btn()
+
+    def reposition_expand_btn(self):
+        if hasattr(self, 'toggle_sidebar_btn') and hasattr(self, 'canvas'):
+            w, h = self.canvas.size
+            self.toggle_sidebar_btn.setGeometry(w - 40, 10, 30, 30)
+
+    def toggle_sidebar(self):
+        if hasattr(self, 'right_panel'):
+            visible = not self.right_panel.isVisible()
+            self.set_sidebar_visible(visible)
+
+    def set_sidebar_visible(self, visible):
+        has_tabs = hasattr(self, 'tab_widget') and self.tab_widget.count() > 0
+        if visible and not has_tabs:
+            return
+
+        if hasattr(self, 'right_panel'):
+            self.right_panel.setVisible(visible)
+            if hasattr(self, 'toggle_sidebar_btn'):
+                if has_tabs:
+                    self.toggle_sidebar_btn.show()
+                    self.toggle_sidebar_btn.setText(">>" if visible else "<<")
+                else:
+                    self.toggle_sidebar_btn.hide()
+            if visible and has_tabs:
+                if hasattr(self, 'splitter'):
+                    total_w = self.splitter.width()
+                    right_w = 400
+                    self.splitter.setSizes([total_w - right_w, right_w])
+            self.reposition_expand_btn()
 
     def on_mouse_wheel(self, event):
         self._hud_timer.start()

@@ -968,15 +968,14 @@
                     
                 </div>
                 <div class="syntax-box">
-                    <div class="syntax-content">alignment [alignment_identifier] or alignment list</div>
+                    <div class="syntax-content">alignment [filepath]</div>
                     <button class="copy-btn" onclick="copyText('alignment', this)">Copy</button>
                 </div>
                 <p><strong>Function:</strong> Dynamically changes the active Multiple Sequence Alignment file (<code>.fasta</code> or <code>.h5</code>) used by the viewer and reloads the MSA mapping.</p>
                 <div class="subheading">Arguments</div>
                 <ul>
                     <li><strong>Without arguments:</strong> Opens a file dialog explorer to manually select a FASTA or H5 MSA file.</li>
-                    <li><strong><code>alignment_identifier</code>:</strong> An index number or a case-insensitive substring query matching a file in the Multiple Alignments folder.</li>
-                    <li><strong><code>list</code>:</strong> Prints a list of all available alignment files in the Multiple Alignments folder to the console and identifies which one is currently active.</li>
+                    <li><strong><code>filepath</code>:</strong> A direct absolute or relative file path to an MSA file (e.g. <code>Input_Files/Multiple_Alignments/SeqSet_alignment.fasta</code>).</li>
                 </ul>
                 <div class="callout">
                     <div class="callout-title">⚠️ Loading Rules &amp; Integrity Checks</div>
@@ -985,9 +984,7 @@
                 <div class="subheading">Examples</div>
                 <ul class="example-list">
                     <li class="example-item"><span>alignment</span><button class="copy-btn" onclick="copyText('alignment', this)">Copy</button></li>
-                    <li class="example-item"><span>alignment list</span><button class="copy-btn" onclick="copyText('alignment list', this)">Copy</button></li>
-                    <li class="example-item"><span>alignment 3</span><button class="copy-btn" onclick="copyText('alignment 3', this)">Copy</button></li>
-                    <li class="example-item"><span>alignment kinase_msa</span><button class="copy-btn" onclick="copyText('alignment kinase_msa', this)">Copy</button></li>
+                    <li class="example-item"><span>alignment Input_Files/Multiple_Alignments/SeqSet_alignment.fasta</span><button class="copy-btn" onclick="copyText('alignment Input_Files/Multiple_Alignments/SeqSet_alignment.fasta', this)">Copy</button></li>
                 </ul>
             </section>
 
@@ -1353,14 +1350,14 @@
                     
                 </div>
                 <div class="syntax-box">
-                    <div class="syntax-content">meta  |  meta show &lt;property_name&gt;  |  meta download [filename] [expression]</div>
+                    <div class="syntax-content">meta [filename]  |  meta  |  meta show &lt;property_name&gt;  |  meta download [filename] [expression]</div>
                     <button class="copy-btn" onclick="copyText('meta', this)">Copy</button>
                 </div>
                 <p><strong>Function:</strong> Manages node metadata by allowing users to upload Excel/CSV tables, display metadata in the HUD, or download/export metadata subsets based on logical expressions.</p>
                 
                 <div class="subheading">Subcommands &amp; Usage</div>
                 <ul>
-                    <li><strong><code>meta</code> (No Arguments):</strong> Opens a file dialog explorer to select metadata files (Excel <code>.xlsx</code>/<code>.xls</code> or CSV <code>.csv</code>) to merge into the current session. Files must contain sequence headers in the first column, property names in the first row, and property types (number/text) in the second row.</li>
+                    <li><strong><code>meta [filename]</code> / <code>meta</code> (No Arguments):</strong> If a file path or name is provided (e.g., <code>meta metadata.xlsx</code>), it loads that Excel or CSV metadata file directly from disk without opening any GUI popup. If called with no arguments, it opens a file explorer dialog explorer to select metadata files manually. Files must contain sequence headers in the first column, property names in the first row, and property types (number/text) in the second row.</li>
                     <li><strong><code>meta show &lt;property_name&gt;</code> / <code>meta display &lt;property_name&gt;</code>:</strong> Activates a HUD text box in the bottom-right corner of the viewer displaying the value of the specified property when a node is clicked.</li>
                     <li><strong><code>meta show clear</code> / <code>meta show off</code>:</strong> Deactivates and hides the metadata property HUD.</li>
                     <li><strong><code>meta retrieve / download / export [filename] [expression]</code>:</strong> Exports session metadata to an Excel or CSV file in the metadata cache directory, optionally filtered by a logical expression. If no filename is provided, opens a save file dialog.</li>

@@ -546,6 +546,4 @@ def force_light_palette(app):
     app.setPalette(palette)
 
 
-# --- 8. Boolean Logic Engine ---
-
 

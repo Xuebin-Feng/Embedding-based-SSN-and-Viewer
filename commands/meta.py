@@ -3,9 +3,261 @@ import os
 import re
 import numpy as np
 import pandas as pd
-import h5py
 import SSN_Utils as utils
-from PyQt6 import QtWidgets
+from PyQt6 import QtWidgets, QtCore
+from PyQt6 import QtGui
+
+
+class MetadataTableModel(QtCore.QAbstractTableModel):
+    """High-performance table model backed directly by viewer.metadata arrays."""
+    def __init__(self, viewer):
+        super().__init__()
+        self.viewer = viewer
+        self.columns = []
+        self.refresh_columns()
+
+    def refresh_columns(self):
+        self.beginResetModel()
+        self.columns = ["Node ID"]
+        if hasattr(self.viewer, 'metadata'):
+            self.columns.extend([k for k in self.viewer.metadata.keys() if k.lower() != "length"])
+        self.endResetModel()
+
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        return getattr(self.viewer, 'n_nodes', 0)
+
+    def columnCount(self, parent=QtCore.QModelIndex()):
+        return len(self.columns)
+
+    def data(self, index, role=QtCore.Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        row = index.row()
+        col = index.column()
+        col_name = self.columns[col]
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            if col_name == "Node ID":
+                return str(self.viewer.full_headers[row])
+            else:
+                meta_entry = self.viewer.metadata.get(col_name)
+                if meta_entry is not None:
+                    val = meta_entry["values"][row]
+                    if isinstance(val, (float, np.floating)):
+                        if pd.isna(val):
+                            return ""
+                        return f"{val:g}"
+                    return str(val) if pd.notna(val) else ""
+        elif role == QtCore.Qt.ItemDataRole.EditRole:
+            if col_name == "Node ID":
+                return str(self.viewer.full_headers[row])
+            else:
+                meta_entry = self.viewer.metadata.get(col_name)
+                if meta_entry is not None:
+                    val = meta_entry["values"][row]
+                    if isinstance(val, (float, np.floating)):
+                        if pd.isna(val):
+                            return ""
+                        return str(val)
+                    return str(val) if pd.notna(val) else ""
+        elif role == QtCore.Qt.ItemDataRole.UserRole:
+            # Return raw sortable value
+            if col_name == "Node ID":
+                return str(self.viewer.full_headers[row])
+            else:
+                meta_entry = self.viewer.metadata.get(col_name)
+                if meta_entry is not None:
+                    val = meta_entry["values"][row]
+                    if isinstance(val, (float, np.floating)) and pd.isna(val):
+                        return None
+                    return val
+        return None
+
+    def flags(self, index):
+        if not index.isValid():
+            return QtCore.Qt.ItemFlag.NoItemFlags
+        base_flags = QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable
+        col_name = self.columns[index.column()]
+        if col_name != "Node ID":
+            return base_flags | QtCore.Qt.ItemFlag.ItemIsEditable
+        return base_flags
+
+    def setData(self, index, value, role=QtCore.Qt.ItemDataRole.EditRole):
+        if not index.isValid() or role != QtCore.Qt.ItemDataRole.EditRole:
+            return False
+        row = index.row()
+        col = index.column()
+        col_name = self.columns[col]
+        
+        if col_name == "Node ID":
+            return False
+            
+        meta_entry = self.viewer.metadata.get(col_name)
+        if meta_entry is None:
+            return False
+            
+        prop_type = meta_entry["type"]
+        if prop_type == "number":
+            try:
+                if not str(value).strip():
+                    parsed_val = np.nan
+                else:
+                    parsed_val = float(value)
+            except ValueError:
+                return False
+        else:
+            parsed_val = str(value)
+            
+        meta_entry["values"][row] = parsed_val
+        self.dataChanged.emit(index, index, [QtCore.Qt.ItemDataRole.DisplayRole, QtCore.Qt.ItemDataRole.EditRole])
+        return True
+
+    def headerData(self, section, orientation, role=QtCore.Qt.ItemDataRole.DisplayRole):
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            if orientation == QtCore.Qt.Orientation.Horizontal:
+                return self.columns[section]
+            else:
+                return str(section + 1)
+        return None
+
+
+class MultiColumnFilterProxyModel(QtCore.QSortFilterProxyModel):
+    """Proxy model that filters by visibility mask AND per-column text filters."""
+    def __init__(self, viewer):
+        super().__init__()
+        self.viewer = viewer
+        self.column_filters = {}  # col_index -> filter_text
+
+    def set_column_filter(self, col, text):
+        self.column_filters[col] = text.lower().strip()
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, source_row, source_parent):
+        # Visibility mask filter
+        if hasattr(self.viewer, 'visible_mask'):
+            if not bool(self.viewer.visible_mask[source_row]):
+                return False
+        # Per-column text filters
+        for col, text in self.column_filters.items():
+            if not text:
+                continue
+            idx = self.sourceModel().index(source_row, col)
+            val = str(self.sourceModel().data(idx, QtCore.Qt.ItemDataRole.DisplayRole) or "")
+            if text not in val.lower():
+                return False
+        return True
+
+    def lessThan(self, left, right):
+        left_val = self.sourceModel().data(left, QtCore.Qt.ItemDataRole.UserRole)
+        right_val = self.sourceModel().data(right, QtCore.Qt.ItemDataRole.UserRole)
+        # Handle None
+        if left_val is None and right_val is None:
+            return False
+        if left_val is None:
+            return True
+        if right_val is None:
+            return False
+        # Numeric comparison
+        if isinstance(left_val, (int, float, np.integer, np.floating)) and isinstance(right_val, (int, float, np.integer, np.floating)):
+            return float(left_val) < float(right_val)
+        return str(left_val).lower() < str(right_val).lower()
+
+    def headerData(self, section, orientation, role=QtCore.Qt.ItemDataRole.DisplayRole):
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            if orientation == QtCore.Qt.Orientation.Vertical:
+                return str(section + 1)
+        return super().headerData(section, orientation, role)
+
+
+class FilterHeaderView(QtWidgets.QHeaderView):
+    """Custom header with filter QLineEdit widgets embedded below each column header."""
+    filterChanged = QtCore.pyqtSignal(int, str)
+
+    def __init__(self, parent=None):
+        super().__init__(QtCore.Qt.Orientation.Horizontal, parent)
+        self._editors = []
+        self._padding = 4
+        self.setSectionsClickable(True)
+        self.setSortIndicatorShown(True)
+        self.sectionResized.connect(self._adjust_positions)
+        self.sectionMoved.connect(self._adjust_positions)
+
+    def setFilterBoxes(self, count):
+        # Remove old editors
+        for ed in self._editors:
+            ed.deleteLater()
+        self._editors = []
+        for i in range(count):
+            editor = QtWidgets.QLineEdit(self)
+            editor.setPlaceholderText("Filter...")
+            editor.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d0d7de;
+                    border-radius: 3px;
+                    padding: 1px 4px;
+                    font-size: 8.5pt;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #0969da;
+                }
+            """)
+            editor.textChanged.connect(lambda text, col=i: self.filterChanged.emit(col, text))
+            self._editors.append(editor)
+        self._adjust_positions()
+
+    def _adjust_positions(self):
+        for i, editor in enumerate(self._editors):
+            h = self.sectionSize(i)
+            px = self.sectionPosition(i) - self.offset()
+            filter_h = 22
+            editor.setGeometry(px + self._padding, 2,
+                               h - 2 * self._padding, filter_h)
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        # Draw background
+        painter.fillRect(rect, QtGui.QColor("#f0f0f0"))
+        
+        # Draw right and bottom borders
+        painter.setPen(QtGui.QColor("#e2e2e2"))
+        painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+        
+        # Draw column title text in the lower half
+        filter_h = 22
+        offset_y = filter_h + 4
+        text_rect = QtCore.QRect(rect.x() + 6, rect.y() + offset_y, rect.width() - 12, rect.height() - offset_y)
+        
+        # Get header text
+        text = str(self.model().headerData(logicalIndex, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) or "")
+        
+        # Append sort arrow if this is the sorted column
+        if self.isSortIndicatorShown() and self.sortIndicatorSection() == logicalIndex:
+            order = self.sortIndicatorOrder()
+            text += "  \u25B2" if order == QtCore.Qt.SortOrder.AscendingOrder else "  \u25BC"
+        
+        painter.setPen(QtGui.QColor("#1f2328"))
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSize(9)
+        painter.setFont(font)
+        painter.drawText(text_rect, QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter, text)
+        
+        painter.restore()
+
+    def sizeHint(self):
+        s = super().sizeHint()
+        s.setHeight(s.height() + 26)  # Extra space for filter row
+        return s
+
+    def updateGeometries(self):
+        super().updateGeometries()
+        self._adjust_positions()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._adjust_positions()
+
 
 def print_help(meta_dir_help):
     print(f"""
@@ -42,7 +294,7 @@ def is_logic_expression(arg):
     # Check if the argument has typical boolean logic expression characters:
     # { } (metadata), # # (cluster/labels), @ @ (file search), " " (header text query),
     # &, |, !, ^ (logic operators), or represents UI selection $sele$
-    if any(c in arg for c in '{{}}#@&|!^"'):
+    if any(c in arg for c in '{}#@&|!^"'):
         return True
     if arg.lower() == '$sele$':
         return True
@@ -50,6 +302,181 @@ def is_logic_expression(arg):
     if re.match(r'^[a-zA-Z_][\d\.]+$', arg):
         return True
     return False
+
+def inject_spreadsheet_panel(viewer, show_sidebar=True):
+    if not getattr(viewer, 'metadata', None):
+        return
+    real_keys = [k for k in viewer.metadata.keys() if k.lower() != "length"]
+    if not real_keys:
+        return
+
+    if hasattr(viewer, 'tab_widget'):
+        tab_idx = -1
+        for idx in range(viewer.tab_widget.count()):
+            if viewer.tab_widget.tabText(idx) == "Metadata":
+                tab_idx = idx
+                break
+
+        if tab_idx == -1:
+            # Build the table view
+            table_view = QtWidgets.QTableView()
+            source_model = MetadataTableModel(viewer)
+            proxy_model = MultiColumnFilterProxyModel(viewer)
+            proxy_model.setSourceModel(source_model)
+            table_view.setModel(proxy_model)
+
+            table_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+            table_view.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+            table_view.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked | QtWidgets.QAbstractItemView.EditTrigger.EditKeyPressed)
+            table_view.setSortingEnabled(False)
+            table_view.setAlternatingRowColors(True)
+
+            table_view.setStyleSheet("""
+                QTableView {
+                    gridline-color: #e2e2e2;
+                    background-color: #ffffff;
+                    alternate-background-color: #f8f9fa;
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    font-size: 9.5pt;
+                    border: none;
+                }
+                QTableView::item:selected {
+                    background-color: #e6f7ff;
+                    color: #1f2328;
+                }
+                QHeaderView::section {
+                    background-color: #f0f0f0;
+                    padding: 4px;
+                    border: none;
+                    border-right: 1px solid #e2e2e2;
+                    border-bottom: 2px solid #e2e2e2;
+                    font-weight: bold;
+                    font-size: 9pt;
+                }
+            """)
+
+            # Install filter header
+            filter_header = FilterHeaderView(table_view)
+            table_view.setHorizontalHeader(filter_header)
+            filter_header.setFilterBoxes(source_model.columnCount())
+            filter_header.filterChanged.connect(proxy_model.set_column_filter)
+
+            # Custom Sorting Cycle: Ascending -> Descending -> Unsorted
+            table_view._current_sort_col = -1
+            table_view._current_sort_order = QtCore.Qt.SortOrder.AscendingOrder
+
+            def handle_header_click(logical_index):
+                header = table_view.horizontalHeader()
+                if table_view._current_sort_col == logical_index:
+                    if table_view._current_sort_order == QtCore.Qt.SortOrder.AscendingOrder:
+                        # Cycle from Ascending to Descending
+                        table_view._current_sort_order = QtCore.Qt.SortOrder.DescendingOrder
+                        proxy_model.sort(logical_index, QtCore.Qt.SortOrder.DescendingOrder)
+                        header.setSortIndicator(logical_index, QtCore.Qt.SortOrder.DescendingOrder)
+                        header.setSortIndicatorShown(True)
+                    else:
+                        # Cycle from Descending to Unsorted
+                        table_view._current_sort_col = -1
+                        proxy_model.sort(-1, QtCore.Qt.SortOrder.AscendingOrder)
+                        header.setSortIndicatorShown(False)
+                else:
+                    # Sort Ascending on new column
+                    table_view._current_sort_col = logical_index
+                    table_view._current_sort_order = QtCore.Qt.SortOrder.AscendingOrder
+                    proxy_model.sort(logical_index, QtCore.Qt.SortOrder.AscendingOrder)
+                    header.setSortIndicator(logical_index, QtCore.Qt.SortOrder.AscendingOrder)
+                    header.setSortIndicatorShown(True)
+
+            filter_header.sectionClicked.connect(handle_header_click)
+
+            # Double-click to locate/pan (only for Node ID column)
+            def on_table_double_clicked(index):
+                col_name = source_model.columns[index.column()]
+                if col_name == "Node ID":
+                    source_index = proxy_model.mapToSource(index)
+                    row = source_index.row()
+                    if hasattr(viewer, 'pos') and row < len(viewer.pos):
+                        viewer.view.camera.center = tuple(viewer.pos[row][:2])
+                        viewer.selected_indices = [row]
+                        viewer.selected_node_idx = row
+                        viewer.update_selection_visual()
+                        if hasattr(viewer, '_hud_timer'):
+                            viewer._hud_timer.start()
+            table_view.doubleClicked.connect(on_table_double_clicked)
+
+            # Selection sync: table -> viewer
+            def on_table_selection_changed():
+                if getattr(viewer, '_syncing_selection', False):
+                    return
+                viewer._syncing_selection = True
+                try:
+                    selected_rows = table_view.selectionModel().selectedRows()
+                    new_selected = []
+                    for index in selected_rows:
+                        source_index = proxy_model.mapToSource(index)
+                        new_selected.append(source_index.row())
+                    viewer.selected_indices = new_selected
+                    viewer.update_selection_visual()
+                finally:
+                    viewer._syncing_selection = False
+            table_view.selectionModel().selectionChanged.connect(on_table_selection_changed)
+
+            # Store references
+            viewer.metadata_table_view = table_view
+            viewer.metadata_source_model = source_model
+            viewer.metadata_proxy_model = proxy_model
+
+            # Selection sync: viewer -> table
+            def sync_selection_to_table(node_idx=None):
+                if getattr(viewer, '_syncing_selection', False):
+                    return
+                viewer._syncing_selection = True
+                try:
+                    selection_model = table_view.selectionModel()
+                    selection_model.clearSelection()
+                    if node_idx is not None:
+                        source_idx = source_model.index(node_idx, 0)
+                        proxy_idx = proxy_model.mapFromSource(source_idx)
+                        if proxy_idx.isValid():
+                            row_start = proxy_model.index(proxy_idx.row(), 0)
+                            row_end = proxy_model.index(proxy_idx.row(), source_model.columnCount() - 1)
+                            selection_model.select(
+                                QtCore.QItemSelection(row_start, row_end),
+                                QtCore.QItemSelectionModel.SelectionFlag.Select
+                            )
+                            table_view.scrollTo(proxy_idx, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
+                finally:
+                    viewer._syncing_selection = False
+            viewer.sync_metadata_table_selection = sync_selection_to_table
+
+            # Visibility sync
+            def sync_visibility_to_table():
+                proxy_model.invalidateFilter()
+            viewer.sync_metadata_table_visibility = sync_visibility_to_table
+
+            # Add tab
+            viewer.tab_widget.addTab(table_view, "Metadata")
+            tab_idx = viewer.tab_widget.count() - 1
+
+            # Sync initial selection
+            sel_idx = getattr(viewer, 'selected_node_idx', None)
+            if sel_idx is not None:
+                sync_selection_to_table(sel_idx)
+
+        else:
+            # Tab already exists — refresh columns if needed
+            if hasattr(viewer, 'metadata_source_model'):
+                viewer.metadata_source_model.refresh_columns()
+                if hasattr(viewer, 'metadata_table_view'):
+                    hdr = viewer.metadata_table_view.horizontalHeader()
+                    if isinstance(hdr, FilterHeaderView):
+                        hdr.setFilterBoxes(viewer.metadata_source_model.columnCount())
+
+        viewer.tab_widget.setCurrentIndex(tab_idx)
+        if show_sidebar:
+            viewer.set_sidebar_visible(True)
+        else:
+            viewer.set_sidebar_visible(False)
 
 def run(viewer, args):
     # --- 1. Help & Usage ---
@@ -194,26 +621,50 @@ def run(viewer, args):
     else:
         # Upload mode
         if args:
-            msg = "Error: Invalid arguments. To upload metadata, run 'meta' with no arguments to open the file explorer."
-            Command_Engine.print_help(viewer, msg)
-            return
-
-        # No arguments -> Open file selection dialog (multiple files allowed)
-        try:
-            file_paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
-                viewer.canvas.native,
-                "Select Metadata Files",
-                meta_dir,
-                "Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;All Files (*)"
-            )
-            if not file_paths:
-                msg = "Metadata upload cancelled."
+            file_paths = []
+            for arg in args:
+                path = arg.strip()
+                # 1. Check if direct path exists
+                if os.path.exists(path):
+                    file_paths.append(os.path.abspath(path))
+                else:
+                    # 2. Check if it exists inside the metadata directory
+                    path_in_dir = os.path.join(meta_dir, path)
+                    if os.path.exists(path_in_dir):
+                        file_paths.append(os.path.abspath(path_in_dir))
+                    else:
+                        # 3. Try appending common extensions
+                        found = False
+                        for ext in ['.xlsx', '.xls', '.csv']:
+                            if os.path.exists(path + ext):
+                                file_paths.append(os.path.abspath(path + ext))
+                                found = True
+                                break
+                            elif os.path.exists(os.path.join(meta_dir, path + ext)):
+                                file_paths.append(os.path.abspath(os.path.join(meta_dir, path + ext)))
+                                found = True
+                                break
+                        if not found:
+                            msg = f"Error: Metadata file '{path}' not found (checked absolute, relative, and {meta_dir})."
+                            Command_Engine.print_help(viewer, msg)
+                            return
+        else:
+            # No arguments -> Open file selection dialog (multiple files allowed)
+            try:
+                file_paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+                    viewer.canvas.native,
+                    "Select Metadata Files",
+                    meta_dir,
+                    "Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;All Files (*)"
+                )
+                if not file_paths:
+                    msg = "Metadata upload cancelled."
+                    Command_Engine.print_help(viewer, msg)
+                    return
+            except Exception as e:
+                msg = f"Error opening file dialog: {e}"
                 Command_Engine.print_help(viewer, msg)
                 return
-        except Exception as e:
-            msg = f"Error opening file dialog: {e}"
-            Command_Engine.print_help(viewer, msg)
-            return
 
     # --- 3. Execute Download Mode ---
     if is_download:
@@ -462,26 +913,7 @@ def run(viewer, args):
             import traceback
             traceback.print_exc()
 
-    # Cache metadata to the active .h5 layout file if any success
-    if successful_files:
-        cache_path, _ = utils.get_cache_filename()
-        if os.path.exists(cache_path):
-            try:
-                with h5py.File(cache_path, "a") as hf:
-                    if "metadata" in hf:
-                        del hf["metadata"]
-                    meta_group = hf.create_group("metadata")
-                    for p_name, p_data in viewer.metadata.items():
-                        p_type = p_data["type"]
-                        vals = p_data["values"]
-                        if p_type == "number":
-                            ds = meta_group.create_dataset(p_name, data=vals, compression="gzip")
-                        else:
-                            dt_str = h5py.string_dtype(encoding='utf-8')
-                            ds = meta_group.create_dataset(p_name, data=np.array(vals, dtype=object), dtype=dt_str, compression="gzip")
-                        ds.attrs["type"] = p_type
-            except Exception as e:
-                print(f"Warning: Failed to write metadata to cache file: {e}")
+    # Auto-caching is disabled. Metadata is only held in memory (viewer.metadata) until saved manually.
 
     # Build response message
     msg_parts = []
@@ -491,6 +923,10 @@ def run(viewer, args):
             f"Matched {len(matched_nodes)} unique nodes, ignored {total_unmatched} rows. "
             f"Merged properties: {', '.join(sorted(all_merged_props))}."
         )
+        # Inject side panel spreadsheet and refresh its columns
+        inject_spreadsheet_panel(viewer)
+        if hasattr(viewer, 'metadata_source_model'):
+            viewer.metadata_source_model.refresh_columns()
     if failed_files:
         fail_details = "; ".join([f"{f}: {err}" for f, err in failed_files])
         msg_parts.append(f"Failed to upload from {len(failed_files)} file(s): {fail_details}")
