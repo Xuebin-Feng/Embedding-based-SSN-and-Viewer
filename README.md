@@ -73,18 +73,27 @@ The pipeline supports two primary pathways for Sequence Similarity Network (SSN)
 
 2. **Set up the environment:**
 
-   **🪟 Windows**:
-   Double-click `install.bat` in the project root to generate Windows Shortcuts (`.lnk` files) with your custom logo icon in the project root and optionally on your Desktop.
-
-   **🐧 Linux & 🍏 macOS (Adaptation in Progress)**:
-   Open your terminal, navigate to the project directory, and execute the installation script:
+   * **🪟 Windows**:
+     Double-click `install.bat` in the project root to generate Windows Shortcuts (`.lnk` files) in the project root and optionally on your Desktop.
      
-   ```bash
-   cd Sequence_Similarity_Network_Viewer
-   chmod +x install.sh
-   ./install.sh
-   ```
-   This will configure execution permissions for all scripts inside `src/bin/` and generate launchers in the project root (including `.desktop` entries on Linux).
+     > [!TIP]
+     > It is highly recommended to enable **Developer Mode** in your Windows Settings (Search for "Developer settings" in Windows). This allows symbolic links to be created without elevation, which is required by the Hugging Face `transformers` cache model download system to avoid duplicating file storage.
+     
+   * **🍏 macOS**:
+     Before double-clicking `install.command` for the first time, you must grant it execution permissions via the terminal:
+     ```bash
+     chmod +x install.command
+     ```
+     Once granted, double-click `install.command` in the project root to configure permissions for scripts in `src/bin/` and generate double-clickable `.command` launchers (`SSN_Viewer.command` and `SSN_Tools.command`) in the project root.
+     
+   * **🐧 Linux**:
+     Open your terminal, navigate to the project directory, and execute the installation script:
+     ```bash
+     cd Sequence_Similarity_Network_Viewer
+     chmod +x install.sh
+     ./install.sh
+     ```
+     This will configure execution permissions and generate launchers (`SSN_Viewer` and `SSN_Tools`) as well as system `.desktop` application entries.
 
 ---
 
@@ -93,26 +102,32 @@ The pipeline supports two primary pathways for Sequence Similarity Network (SSN)
 ```directory
 Sequence_Similarity_Network_Viewer/
 │
-├── SSN_Viewer.py            # Main PyQt6 / VisPy desktop visualization application
-├── SSN_Tools.py             # GUI & CLI utility for generating network data & computing layouts
-├── SSN_Config.py            # GUI configuration manager for inputs, thresholds, and models
-├── SSN_Utils.py             # Shared utility functions (IO, math helper, parsing)
+├── install.bat               # Windows installer (creates .lnk shortcuts)
+├── install.command           # macOS installer (creates double-clickable launchers)
+├── install.sh                # Linux installer (creates symlinks and desktop entries)
 │
-├── Alignment_Manager.py     # Pairwise and multiple sequence alignment runner
-├── Command_Engine.py        # Pipeline execution coordinator
-├── Detect_GPU.py            # GPU hardware check script
+├── src/                      # Source code directory
+│   ├── SSN_Viewer.py         # Main PyQt6 / VisPy desktop visualization application
+│   ├── SSN_Tools.py          # GUI & CLI utility for generating network data & computing layouts
+│   ├── SSN_Config.py         # GUI configuration manager for inputs, thresholds, and models
+│   ├── SSN_Utils.py          # Shared utility functions (IO, math helper, parsing)
+│   │
+│   ├── bin/                  # Startup scripts and launchers
+│   │   ├── SSN_Viewer.bat    # Windows Viewer startup script
+│   │   ├── SSN_Tools.bat     # Windows Tools startup script
+│   │   ├── SSN_Viewer.sh     # Linux/macOS Viewer startup script
+│   │   ├── SSN_Tools.sh      # Linux/macOS Tools startup script
+│   │   └── logos/            # Application custom icon files (.png and .ico)
+│   │
+│   ├── commands/             # Command modules for interactive viewer console
+│   ├── resources/            # Configuration and system prompts
+│   ├── utilities/            # Underlying processing and pipeline scripts
+│   └── web_ui/               # Embedded web UI backend and interfaces
 │
-├── commands/                # Command modules for interactive viewer console
-├── docs/                    # Documentation screenshots, demonstration GIFs, and descriptions
-│   ├── assets/              # UI screenshots and demonstration animated GIFs
-│   └── utility_descriptions/# Markdown files containing detailed utility descriptions
-│
-├── utilities/               # Underlying processing and pipeline scripts
-├── VR_Viewer/               # VR-specific configuration, scripts, and Unity Application
-│
-├── Input_Files/             # Put your raw input sequence FASTA files here
-├── Embeddings/              # Directory where ESM protein embeddings are cached
-└── Results/                 # Visual outputs, exported graphs, and layouts
+├── docs/                     # Documentation screenshots and descriptions
+├── Input_Files/              # Raw input sequence FASTA files
+├── Embeddings/               # Directory where ESM protein embeddings are cached
+└── Results/                  # Visual outputs, exported graphs, and layouts
 ```
 
 ---
