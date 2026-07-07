@@ -9,6 +9,12 @@ import re
 
 MAX_CORES = os.cpu_count() or 16
 
+# Ensure src/ (the directory containing all project modules) is on sys.path.
+# This is needed when the script is run as a subprocess or from a different working directory.
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
 # Fix High-DPI scaling
 os.environ["QT_API"] = "pyqt6"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
@@ -25,7 +31,7 @@ from PyQt6.QtCore import Qt
 
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QIcon
 
 class ResponsiveTextBrowser(QWebEngineView):
     def __init__(self, *args, **kwargs):
@@ -305,6 +311,14 @@ class ToolsGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SSN Utilities Tools")
+        
+        # Set Window Icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "tool_logo.ico")
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "tool_logo.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            
         self.resize(850, 650)
         
         # --- CENTRALIZED SCRIPT TIPS DICTIONARY ---
@@ -1302,7 +1316,7 @@ class ToolsGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to save directories:\n{e}")
 
     def load_utilities(self):
-        utils_dir = "utilities"
+        utils_dir = os.path.join(_SRC_DIR, "utilities")
         if not os.path.exists(utils_dir):
             QMessageBox.critical(self, "Error", f"Could not find '{utils_dir}' directory.")
             return
@@ -1339,8 +1353,8 @@ class ToolsGUI(QMainWindow):
             md_name = f"{tab_name}.md"
             alt_md_name = f"{tab_name.replace(' ', '_')}.md"
             
-            md_path = os.path.join("docs", "utility_descriptions", md_name)
-            alt_md_path = os.path.join("docs", "utility_descriptions", alt_md_name)
+            md_path = os.path.join(_SRC_DIR, "utilities", "utility_descriptions", md_name)
+            alt_md_path = os.path.join(_SRC_DIR, "utilities", "utility_descriptions", alt_md_name)
             
             markdown_content = ""
             
@@ -1369,7 +1383,7 @@ class ToolsGUI(QMainWindow):
                         f"## ⚠️ Documentation Missing\n\n"
                         f"No documentation file found for this tab.\n\n"
                         f"To add one, create a Markdown document at:\n\n"
-                        f"`docs\\utility_descriptions\\{md_name}`"
+                        f"`src\\utilities\\utility_descriptions\\{md_name}`"
                     )
             
             html_content = render_markdown_with_math(markdown_content.strip())
@@ -2298,6 +2312,14 @@ class ToolsGUI(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # Set Application-wide Icon
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "tool_logo.ico")
+    if not os.path.exists(icon_path):
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "tool_logo.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        
     try:
         from SSN_Utils import force_light_palette
         force_light_palette(app)

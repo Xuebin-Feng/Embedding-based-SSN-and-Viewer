@@ -74,23 +74,17 @@ The pipeline supports two primary pathways for Sequence Similarity Network (SSN)
 2. **Set up the environment:**
 
    **🪟 Windows**:
-   Double-click `SSN_Tools.bat` or `SSN_Viewer.bat`. A self-contained virtual Python environment will be created at the project root.
+   Double-click `install.bat` in the project root to generate Windows Shortcuts (`.lnk` files) with your custom logo icon in the project root and optionally on your Desktop.
 
    **🐧 Linux & 🍏 macOS (Adaptation in Progress)**:
-   Open your terminal and run the following:
+   Open your terminal, navigate to the project directory, and execute the installation script:
      
-   Navigate to the project directory:
    ```bash
    cd Sequence_Similarity_Network_Viewer
+   chmod +x install.sh
+   ./install.sh
    ```
-   Grant execution permissions to the `.sh` script files:
-   ```bash
-   chmod +x *.sh
-   ```
-   Execute the tools script to initialize the virtual environment and install dependencies:
-   ```bash
-   ./SSN_Tools.sh
-   ```
+   This will configure execution permissions for all scripts inside `src/bin/` and generate launchers in the project root (including `.desktop` entries on Linux).
 
 ---
 

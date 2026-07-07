@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SSN Viewer Metadata</title>
+    <!-- Load local Tabulator CSS -->
+    <link rel="stylesheet" href="/meta_resource/tabulator.min.css">
+    <style>
+        :root {
+            --bg-main: #f8fafc;
+            --bg-card: #ffffff;
+            --border-color: #e2e8f0;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --primary: #0969da;
+            --primary-hover: #0353b2;
+            --danger: #ef4444;
+            --font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-family);
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header bar */
+        header {
+            background-color: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 30px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-badge {
+            background-color: #e2e8f0;
+            color: var(--text-secondary);
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 9999px;
+            font-weight: 500;
+        }
+
+        /* Workspace Grid */
+        .workspace {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - 55px);
+            overflow: hidden;
+            background-color: var(--bg-card);
+        }
+
+        .pane-main {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pane-header {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: var(--bg-card);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 25px;
+        }
+
+        .pane-title {
+            font-size: 13.5px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input[type="text"].filter-input {
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--text-primary);
+            background-color: var(--bg-card);
+            outline: none;
+        }
+
+        input[type="text"].filter-input:focus {
+            border-color: var(--primary);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-card);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+            height: 24px;
+            box-sizing: border-box;
+        }
+
+        .btn:hover {
+            background-color: #f1f5f9;
+            color: var(--text-primary);
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+            border-color: var(--primary-hover);
+            color: #ffffff;
+        }
+
+        .tabulator-col-title {
+            padding-right: 20px !important;
+        }
+
+        /* Stack header title and filter container vertically */
+        .tabulator-col-content {
+            display: flex !important;
+            flex-direction: column !important;
+            padding: 0 !important;
+            height: 100% !important;
+        }
+
+        .tabulator-col-title-holder {
+            font-size: 14px !important;
+            font-weight: 600 !important;
+            padding: 8px 10px !important;
+            display: flex !important;
+            align-items: center !important;
+            flex: 1 !important;
+        }
+
+        /* Style the filter container as a separate visual row */
+        .tabulator-header-filter {
+            margin-top: 0 !important;
+            padding: 4px 8px !important;
+            background-color: #f8fafc;
+            border-top: 1px solid var(--border-color) !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+        }
+
+        .tabulator-header-filter input {
+            height: 20px !important;
+            padding: 2px 6px !important;
+            font-size: 11.5px !important;
+            border-radius: 4px !important;
+            box-sizing: border-box !important;
+            border: 1px solid #cbd5e1 !important;
+            outline: none !important;
+            font-weight: normal !important;
+            transition: border-color 0.15s ease-in-out !important;
+        }
+
+        .tabulator-header-filter input:focus {
+            border-color: var(--primary) !important;
+        }
+
+        #table-container {
+            flex: 1;
+            padding: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        #spreadsheet-table {
+            height: 100%;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        /* Scrollbar styles */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        /* Hide HTML5 spin-buttons on number inputs */
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+
+        /* Excel-style cell selection borders and backgrounds */
+        .tabulator-cell.tabulator-range-selected {
+            background-color: rgba(9, 105, 218, 0.12) !important;
+        }
+        .tabulator-cell.tabulator-range-selected-top {
+            border-top: 1px solid #0969da !important;
+        }
+        .tabulator-cell.tabulator-range-selected-bottom {
+            border-bottom: 1px solid #0969da !important;
+        }
+        .tabulator-cell.tabulator-range-selected-left {
+            border-left: 1px solid #0969da !important;
+        }
+        .tabulator-cell.tabulator-range-selected-right {
+            border-right: 1px solid #0969da !important;
+        }
+
+        /* Style selected rows to look exactly like light blue cell range selections */
+        .tabulator-row.tabulator-selected {
+            background-color: rgba(9, 105, 218, 0.12) !important;
+            color: inherit !important;
+        }
+        .tabulator-row.tabulator-selected .tabulator-cell {
+            background-color: transparent !important;
+            border-top: 1px solid #0969da !important;
+            border-bottom: 1px solid #0969da !important;
+        }
+        .tabulator-row.tabulator-selected .tabulator-cell:first-child {
+            border-left: 1px solid #0969da !important;
+        }
+        .tabulator-row.tabulator-selected .tabulator-cell:last-child {
+            border-right: 1px solid #0969da !important;
+        }
+
+        /* Row highlight style */
+        .tabulator-row.row-highlighted {
+            background-color: rgba(245, 158, 11, 0.15) !important;
+            outline: 2px solid #f59e0b !important;
+            outline-offset: -2px;
+        }
+
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📊 SSN Viewer Metadata Spreadsheet</h1>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <button class="btn btn-primary" id="import-btn" style="padding: 6px 16px; font-size: 13px; height: 30px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px;">+ Import</button>
+            <button class="btn" id="export-btn" title="Export Spreadsheet (CSV / Excel)" style="padding: 6px 16px; font-size: 13px; height: 30px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);">📤 Export</button>
+            <button class="btn" id="undo-btn" title="Undo (Ctrl+Z)" style="padding: 6px 12px; font-size: 13px; height: 30px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);">↶ Undo</button>
+            <button class="btn" id="redo-btn" title="Redo (Ctrl+Y)" style="padding: 6px 12px; font-size: 13px; height: 30px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);">↷ Redo</button>
+            <button class="btn" id="help-btn" style="padding: 6px 12px; font-size: 13px; height: 30px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);">Help ?</button>
+            <div id="connection-status" class="status-badge">Connecting...</div>
+        </div>
+    </header>
+
+    <div class="workspace">
+        <div class="pane-main">
+            <div id="table-container">
+                <div id="spreadsheet-table"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load local Tabulator JS -->
+    <script src="/meta_resource/tabulator.min.js"></script>
+    <script>
+        let table = null;
+        let eventSource = null;
+        let isEditingFromVispy = false;
+        let highlightedRowIndex = null;
+        let currentVisibleMask = null;
+        let currentSelectionIndices = null;
+        let currentSelectionIndicesSet = null;
+
+        function textFilterFunc(headerValue, rowValue, rowData, filterParams) {
+            if (headerValue === undefined || headerValue === null || headerValue === "") {
+                return true;
+            }
+            const strVal = String(rowValue === null || rowValue === undefined ? "" : rowValue).toLowerCase();
+            const filterStr = String(headerValue).toLowerCase();
+            
+            if (filterStr.includes("*") || filterStr.includes("?")) {
+                try {
+                    const escaped = filterStr.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+                    const regexStr = '^' + escaped.replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+                    const regex = new RegExp(regexStr);
+                    return regex.test(strVal);
+                } catch(e) {
+                    return false;
+                }
+            }
+            return strVal.includes(filterStr);
+        }
+
+        function evaluateSingleFilter(filterStr, cellVal) {
+            filterStr = filterStr.trim();
+            if (filterStr === "") return true;
+            
+            const rangeMatch = filterStr.match(/^([+-]?\d*(?:\.\d+)?)\s*-\s*([+-]?\d*(?:\.\d+)?)$/);
+            if (rangeMatch) {
+                const min = parseFloat(rangeMatch[1]);
+                const max = parseFloat(rangeMatch[2]);
+                if (!isNaN(min) && !isNaN(max)) {
+                    return cellVal >= min && cellVal <= max;
+                }
+            }
+            
+            const opMatch = filterStr.match(/^([><=!]+)?\s*([+-]?\d*(?:\.\d+)?)$/);
+            if (opMatch) {
+                const op = opMatch[1] || "=";
+                const val = parseFloat(opMatch[2]);
+                if (isNaN(val)) return true;
+                
+                switch(op) {
+                    case ">": return cellVal > val;
+                    case ">=": return cellVal >= val;
+                    case "<": return cellVal < val;
+                    case "<=": return cellVal <= val;
+                    case "=":
+                    case "==": return cellVal === val;
+                    case "!=": return cellVal !== val;
+                }
+            }
+            return false;
+        }
+
+        function evaluateSimpleBooleanExpr(boolStr) {
+            let clean = boolStr.replace(/\s+/g, "");
+            
+            if (clean.includes("|")) {
+                return clean.split("|").some(sub => evaluateSimpleBooleanExpr(sub));
+            }
+            
+            if (clean.includes("^")) {
+                const parts = clean.split("^");
+                let result = evaluateSimpleBooleanExpr(parts[0]);
+                for (let i = 1; i < parts.length; i++) {
+                    result = result !== evaluateSimpleBooleanExpr(parts[i]);
+                }
+                return result;
+            }
+            
+            if (clean.includes("&")) {
+                return clean.split("&").every(sub => evaluateSimpleBooleanExpr(sub));
+            }
+            
+            if (clean.startsWith("!")) {
+                return !evaluateSimpleBooleanExpr(clean.slice(1));
+            }
+            
+            if (clean === "true") return true;
+            if (clean === "false") return false;
+            
+            return false;
+        }
+
+        function evaluateLogicalFilter(filterStr, cellVal) {
+            filterStr = filterStr.trim();
+            if (filterStr === "") return true;
+
+            if (!filterStr.includes("(") && !filterStr.includes("&") && !filterStr.includes("|") && !filterStr.includes("^")) {
+                return evaluateSingleFilter(filterStr, cellVal);
+            }
+
+            let expr = filterStr;
+            const innerParensRegex = /\(([^()]+)\)/;
+            
+            let iterations = 0;
+            while (innerParensRegex.test(expr) && iterations < 50) {
+                iterations++;
+                expr = expr.replace(innerParensRegex, (match, subExpr) => {
+                    if (subExpr.includes("&") || subExpr.includes("|") || subExpr.includes("^")) {
+                        const res = evaluateSimpleBooleanExpr(subExpr);
+                        return res ? "true" : "false";
+                    }
+                    const res = evaluateSingleFilter(subExpr, cellVal);
+                    return res ? "true" : "false";
+                });
+            }
+
+            return evaluateSimpleBooleanExpr(expr);
+        }
+
+        function numberFilterFunc(headerValue, rowValue, rowData, filterParams) {
+            if (headerValue === undefined || headerValue === null || headerValue === "") {
+                return true;
+            }
+            const cellVal = parseFloat(rowValue);
+            if (isNaN(cellVal)) return false;
+            
+            return evaluateLogicalFilter(String(headerValue), cellVal);
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            connectEventStream();
+        });
+
+        function connectEventStream() {
+            const statusBadge = document.getElementById("connection-status");
+            eventSource = new EventSource("/api/events");
+
+            eventSource.onopen = () => {
+                statusBadge.innerText = "Connected";
+                statusBadge.style.backgroundColor = "#dcfce7";
+                statusBadge.style.color = "#15803d";
+            };
+
+            eventSource.onerror = () => {
+                statusBadge.innerText = "Reconnecting...";
+                statusBadge.style.backgroundColor = "#fef3c7";
+                statusBadge.style.color = "#b45309";
+            };
+
+            eventSource.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleServerEvent(message);
+            };
+        }
+
+        function handleServerEvent(event) {
+            switch(event.type) {
+                case "init":
+                    initSpreadsheet(event.data);
+                    break;
+                case "selection_changed": {
+                    const oldLen = currentSelectionIndices ? currentSelectionIndices.length : 0;
+                    const newLen = event.indices ? event.indices.length : 0;
+                    if (oldLen === 0 && newLen === 0) {
+                        break;
+                    }
+                    currentSelectionIndices = event.indices;
+                    currentSelectionIndicesSet = event.indices ? new Set(event.indices) : null;
+                    applyCombinedFilter();
+                    
+                    if (newLen === 0 && table) {
+                        table.deselectRow();
+                        highlightSingleRow(null);
+                    }
+                    break;
+                }
+                case "highlight_row":
+                    highlightSingleRow(event.index);
+                    break;
+                case "visibility_changed":
+                    currentVisibleMask = event.visible_mask;
+                    applyCombinedFilter();
+                    break;
+                case "state_updated":
+                    if (table && event.metadata) {
+                        isEditingFromVispy = true;
+                        if (event.columns) {
+                            const newCols = [
+                                {
+                                    formatter: "rownum", 
+                                    headerSort: false, 
+                                    hoversort: false, 
+                                    width: 50, 
+                                    hozAlign: "center",
+                                    movable: false
+                                },
+                                {
+                                    title: "Sequence Header", 
+                                    field: "Node ID", 
+                                    headerFilter: "input", 
+                                    sorter: "string", 
+                                    hozAlign: "left", 
+                                    minWidth: 200, 
+                                    movable: false, 
+                                    headerFilterFunc: textFilterFunc
+                                }
+                            ];
+                            event.columns.forEach(col => {
+                                if (col === "Node ID") return;
+                                const type = (event.types && event.types[col]) || "text";
+                                let badge = "";
+                                if (type === "number") {
+                                    badge = ' <span style="display: inline-block; color: #1a7f37; font-weight: bold; font-size: 9px; margin-left: 6px; padding: 2px 4px; border: 1px solid #2da44e; border-radius: 3px; background-color: #dafbe1; vertical-align: middle; line-height: 1;">NUM</span>';
+                                } else {
+                                    badge = ' <span style="display: inline-block; color: #0969da; font-weight: bold; font-size: 9px; margin-left: 6px; padding: 2px 4px; border: 1px solid #388bfd; border-radius: 3px; background-color: #ddf4ff; vertical-align: middle; line-height: 1;">TXT</span>';
+                                }
+                                const dragHandle = '<span style="cursor: grab; margin-right: 6px; color: #94a3b8; font-weight: bold; vertical-align: middle;">☰</span>';
+                                const titleText = '<span style="vertical-align: middle;">' + col + '</span>';
+                                newCols.push({
+                                    title: dragHandle + titleText + badge,
+                                    field: col,
+                                    editor: type === "number" ? "number" : "input",
+                                    editorParams: type === "number" ? {step: "any"} : undefined,
+                                    validator: type === "number" ? "numeric" : undefined,
+                                    sorter: type === "number" ? "number" : "string",
+                                    headerFilter: "input",
+                                    hozAlign: "center",
+                                    headerFilterFunc: type === "number" ? numberFilterFunc : textFilterFunc
+                                });
+                            });
+                            table.setColumns(newCols);
+                        }
+                        table.setData(event.metadata).then(() => {
+                            currentSelectionIndices = event.selected_indices;
+                            currentSelectionIndicesSet = event.selected_indices ? new Set(event.selected_indices) : null;
+                            currentVisibleMask = event.visible_mask;
+                            applyCombinedFilter();
+                            isEditingFromVispy = false;
+                        });
+                    }
+                    break;
+            }
+        }
+
+        function initSpreadsheet(data) {
+            const columns = [
+                {
+                    formatter: "rownum", 
+                    headerSort: false, 
+                    hoversort: false, 
+                    width: 50, 
+                    hozAlign: "center",
+                    movable: false
+                },
+                {
+                    title: "Sequence Header", 
+                    field: "Node ID", 
+                    headerFilter: "input", 
+                    sorter: "string", 
+                    hozAlign: "left", 
+                    minWidth: 200, 
+                    movable: false, 
+                    headerFilterFunc: textFilterFunc
+                }
+            ];
+
+            data.columns.forEach(col => {
+                if (col === "Node ID") return;
+                const type = (data.types && data.types[col]) || "text";
+                let badge = "";
+                if (type === "number") {
+                    badge = ' <span style="display: inline-block; color: #1a7f37; font-weight: bold; font-size: 9px; margin-left: 6px; padding: 2px 4px; border: 1px solid #2da44e; border-radius: 3px; background-color: #dafbe1; vertical-align: middle; line-height: 1;">NUM</span>';
+                } else {
+                    badge = ' <span style="display: inline-block; color: #0969da; font-weight: bold; font-size: 9px; margin-left: 6px; padding: 2px 4px; border: 1px solid #388bfd; border-radius: 3px; background-color: #ddf4ff; vertical-align: middle; line-height: 1;">TXT</span>';
+                }
+                const dragHandle = '<span style="cursor: grab; margin-right: 6px; color: #94a3b8; font-weight: bold; vertical-align: middle;">☰</span>';
+                const titleText = '<span style="vertical-align: middle;">' + col + '</span>';
+                columns.push({
+                    title: dragHandle + titleText + badge,
+                    field: col,
+                    editor: type === "number" ? "number" : "input",
+                    editorParams: type === "number" ? {step: "any"} : undefined,
+                    validator: type === "number" ? "numeric" : undefined,
+                    sorter: type === "number" ? "number" : "string",
+                    headerFilter: "input",
+                    hozAlign: "center",
+                    headerFilterFunc: type === "number" ? numberFilterFunc : textFilterFunc
+                });
+            });
+
+            table = new Tabulator("#spreadsheet-table", {
+                data: data.rows,
+                layout: "fitDataFill",
+                columns: columns,
+                selectable: true,
+                virtualDom: true,
+                placeholder: "No network data loaded",
+                headerSortTristate: true,
+                movableColumns: true,
+                history: true,
+                validationMode: "blocking",
+                editTriggerEvent: "dblclick",
+                selectableRange: true,
+                selectableRangeMode: "drag",
+                clipboard: "copy",
+                clipboardCopyRowRange: "range",
+                clipboardCopyConfig: {
+                    columnHeaders: false
+                },
+                clipboardCopyStyled: false,
+                rowFormatter: function(row) {
+                    if (row.getData().id === highlightedRowIndex) {
+                        row.getElement().classList.add("row-highlighted");
+                    } else {
+                        row.getElement().classList.remove("row-highlighted");
+                    }
+                }
+            });
+
+            table.on("cellEdited", (cell) => {
+                const row = cell.getRow().getData();
+                sendAction({
+                    action: "edit_cell",
+                    row: row.id,
+                    column: cell.getField(),
+                    value: cell.getValue()
+                });
+            });
+
+
+
+            table.on("columnMoved", (column, columns) => {
+                const currentCols = table.getColumns();
+                let rownumCol = null;
+                let seqCol = null;
+                const metaCols = [];
+                
+                currentCols.forEach(col => {
+                    const def = col.getDefinition();
+                    if (def.formatter === "rownum") {
+                        rownumCol = def;
+                    } else if (def.field === "Node ID") {
+                        seqCol = def;
+                    } else {
+                        metaCols.push(def);
+                    }
+                });
+                
+                const targetDefs = [rownumCol, seqCol, ...metaCols];
+                
+                let changed = false;
+                for (let i = 0; i < currentCols.length; i++) {
+                    if (currentCols[i].getDefinition().field !== targetDefs[i].field || 
+                        currentCols[i].getDefinition().formatter !== targetDefs[i].formatter) {
+                        changed = true;
+                        break;
+                    }
+                }
+                
+                if (changed) {
+                    table.setColumns(targetDefs);
+                }
+            });
+
+            table.on("historyUndo", (action, component, data) => {
+                if (action === "cellEdit") {
+                    sendAction({
+                        action: "edit_cell",
+                        row: component.getRow().getData().id,
+                        column: component.getField(),
+                        value: component.getValue()
+                    });
+                }
+            });
+
+            table.on("historyRedo", (action, component, data) => {
+                if (action === "cellEdit") {
+                    sendAction({
+                        action: "edit_cell",
+                        row: component.getRow().getData().id,
+                        column: component.getField(),
+                        value: component.getValue()
+                    });
+                }
+            });
+
+
+            document.getElementById("import-btn").addEventListener("click", () => {
+                sendAction({ action: "import_metadata" });
+            });
+
+            document.getElementById("export-btn").addEventListener("click", () => {
+                sendAction({ action: "export_metadata" });
+            });
+
+            document.getElementById("undo-btn").addEventListener("click", () => {
+                if (table) table.undo();
+            });
+
+            document.getElementById("redo-btn").addEventListener("click", () => {
+                if (table) table.redo();
+            });
+
+            const helpBtn = document.getElementById("help-btn");
+            const helpModal = document.getElementById("help-modal");
+            const closeModalBtns = [
+                document.getElementById("close-modal-btn"),
+                document.getElementById("close-modal-btn-ok")
+            ];
+
+            helpBtn.addEventListener("click", () => {
+                helpModal.style.display = "flex";
+            });
+
+            closeModalBtns.forEach(btn => {
+                btn.addEventListener("click", () => {
+                    helpModal.style.display = "none";
+                });
+            });
+
+            helpModal.addEventListener("click", (e) => {
+                if (e.target === helpModal) {
+                    helpModal.style.display = "none";
+                }
+            });
+
+            document.addEventListener("keydown", (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    if (e.key.toLowerCase() === "z") {
+                        e.preventDefault();
+                        if (table) table.undo();
+                    } else if (e.key.toLowerCase() === "y") {
+                        e.preventDefault();
+                        if (table) table.redo();
+                    }
+                }
+            });
+
+            currentSelectionIndices = data.selected_indices;
+            currentSelectionIndicesSet = data.selected_indices ? new Set(data.selected_indices) : null;
+            currentVisibleMask = data.visible_mask;
+            applyCombinedFilter();
+        }
+
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        function applyCombinedFilter() {
+            if (!table) return;
+            table.setFilter((data) => {
+                if (currentVisibleMask && currentVisibleMask[data.id] !== true) {
+                    return false;
+                }
+                if (currentSelectionIndicesSet && currentSelectionIndicesSet.size > 0) {
+                    return currentSelectionIndicesSet.has(data.id);
+                }
+                return true;
+            });
+        }
+
+        function highlightSingleRow(index) {
+            highlightedRowIndex = index;
+            if (!table) return;
+            
+            table.getRows().forEach(row => {
+                const rowEl = row.getElement();
+                if (rowEl) {
+                    if (row.getData().id === highlightedRowIndex) {
+                        rowEl.classList.add("row-highlighted");
+                    } else {
+                        rowEl.classList.remove("row-highlighted");
+                    }
+                }
+            });
+            
+            if (highlightedRowIndex !== null && highlightedRowIndex !== undefined) {
+                const row = table.getRow(highlightedRowIndex);
+                if (row) {
+                    row.scrollTo("center", false).catch(()=>{});
+                }
+            }
+        }
+
+        function sendAction(payload) {
+            fetch("/api/action", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            }).catch(err => {
+                console.error("Action error:", err);
+            });
+        }
+
+        // Clear selection when clicking empty workspace space
+        document.addEventListener("mousedown", (e) => {
+            // Check if the click is on an interactive element or inside the table cells/headers
+            const isInsideCellOrCol = e.target.closest(".tabulator-cell") || e.target.closest(".tabulator-col") || e.target.closest(".tabulator-header");
+            const isInteractive = e.target.closest(".toolbar") || e.target.closest(".search-container") || e.target.tagName.toLowerCase() === "button" || e.target.closest(".modal-overlay") || e.target.closest("input");
+            
+            if (!isInsideCellOrCol && !isInteractive) {
+                // Prevent clearing when clicking scrollbars
+                if (e.target.classList.contains("tabulator-tableholder")) {
+                    const rect = e.target.getBoundingClientRect();
+                    const isClickOnVScroll = (e.clientX >= rect.left + e.target.clientWidth);
+                    const isClickOnHScroll = (e.clientY >= rect.top + e.target.clientHeight);
+                    if (isClickOnVScroll || isClickOnHScroll) {
+                        return;
+                    }
+                }
+                
+                if (table) {
+                    table.deselectRow();
+                    if (table.clearSelection) {
+                        table.clearSelection();
+                    }
+                    if (table.getRanges) {
+                        // Temporarily disable selectableRange to prevent Tabulator from automatically
+                        // recreating a range on the top-left cell when all ranges are removed.
+                        const origSelectable = table.options.selectableRange;
+                        table.options.selectableRange = false;
+                        table.getRanges().forEach(range => range.remove());
+                        table.options.selectableRange = origSelectable;
+                        
+                        // Also clear Tabulator's internal active cell if possible
+                        if (table.modules.edit && table.modules.edit.currentCell) {
+                            table.modules.edit.cancelEdit();
+                        }
+                    }
+                    highlightSingleRow(null);
+                    
+                    // Notify backend to clear its selection state too
+                    sendAction({ action: "clear_selection" });
+                }
+
+                if (document.activeElement && typeof document.activeElement.blur === "function") {
+                    document.activeElement.blur();
+                }
+                
+                // Note: We DO NOT call e.stopPropagation() or e.preventDefault() here
+                // because doing so intercepts Tabulator's native drag/click events 
+                // and breaks the click-and-drag range selection functionality.
+            }
+        });
+
+    </script>
+
+    <!-- Help Modal -->
+    <div id="help-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 9999; justify-content: center; align-items: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;">
+        <div class="modal-content" style="background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; width: 500px; max-width: 90%; padding: 24px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); position: relative; animation: modalFadeIn 0.2s ease-out;">
+            <h3 style="margin-top: 0; font-size: 18px; font-weight: 600; color: var(--primary); display: flex; align-items: center; gap: 8px;">🔍 Search Filter Rules</h3>
+            <button id="close-modal-btn" style="position: absolute; top: 16px; right: 16px; background: none; border: none; font-size: 20px; color: var(--text-secondary); cursor: pointer; line-height: 1;">&times;</button>
+            
+            <div style="margin-top: 16px; font-size: 13px; line-height: 1.6; color: var(--text-secondary);">
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary); font-size: 14px;">Text / Sequence Header Columns:</strong>
+                    <ul style="margin: 6px 0 0 16px; padding: 0;">
+                        <li><strong>Substring Match</strong>: Matches anywhere in the text by default (e.g. <code>candidatus</code>).</li>
+                        <li><strong>Wildcard Match</strong>: Use <code>*</code> for zero or more characters, or <code>?</code> for a single character (e.g. <code>*coli*</code>, <code>b*subtilis</code>, or <code>node?</code>).</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <strong style="color: var(--text-primary); font-size: 14px;">Numerical Columns (e.g. Length):</strong>
+                    <ul style="margin: 6px 0 0 16px; padding: 0;">
+                        <li><strong>Range</strong>: Format <code>min-max</code> (e.g. <code>100-300</code>).</li>
+                        <li><strong>Operators</strong>: Prepend with math operators:
+                            <ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: circle;">
+                                <li><code>&gt;=100</code> (greater than or equal to 100)</li>
+                                <li><code>&lt;=150</code> (less than or equal to 150)</li>
+                                <li><code>&gt;50</code> (greater than 50)</li>
+                                <li><code>&lt;200</code> (less than 200)</li>
+                                <li><code>!=10</code> (not equal to 10)</li>
+                                <li><code>=10</code> or just <code>10</code> (exactly equal to 10)</li>
+                            </ul>
+                        </li>
+                        <li style="margin-top: 8px;"><strong>Logical Commands</strong>: Combine comparisons enclosed in matching parentheses with operators:
+                            <ul style="margin: 4px 0 0 16px; padding: 0; list-style-type: circle;">
+                                <li><code>&amp;</code> (AND): e.g. <code>(&gt;=100)&amp;(&lt;=500)</code></li>
+                                <li><code>|</code> (OR): e.g. <code>(&gt;10)|(&lt;3)</code></li>
+                                <li><code>^</code> (XOR): e.g. <code>(&gt;100)^(&gt;200)</code></li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <div style="margin-top: 24px; font-size: 13px; line-height: 1.6; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 16px;">
+                <h3 style="margin-top: 0; font-size: 16px; font-weight: 600; color: var(--primary); display: flex; align-items: center; gap: 8px;">🖱️ Interaction Rules</h3>
+                
+                <ul style="margin: 8px 0 0 16px; padding: 0;">
+                    <li style="margin-bottom: 8px;"><strong>Network Selection Filtering:</strong> Selecting a group of nodes in the network viewer (e.g., using the selection tool) will automatically filter the spreadsheet to display only the data for those specific nodes.</li>
+                    <li style="margin-bottom: 8px;"><strong>Node Click Highlighting:</strong> Left-clicking an individual node in the network viewer will automatically locate, highlight, and scroll to its corresponding entry in the spreadsheet.</li>
+                </ul>
+            </div>
+            
+            <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
+                <button class="btn btn-primary" id="close-modal-btn-ok" style="padding: 6px 18px; font-size: 13px; height: 32px; border-radius: 6px; font-weight: 600;">Got it</button>
+            </div>
+        </div>
+    </div>
+    
+    <style>
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</body>
+</html>

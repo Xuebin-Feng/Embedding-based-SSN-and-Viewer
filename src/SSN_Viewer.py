@@ -1,11 +1,17 @@
 import unicodedata  # Pre-load to prevent Windows DLL search path conflicts with Qt/OpenGL
 try:
     import torch  # Pre-load to prevent DLL initialization conflicts between PyTorch and PyQt6/OpenGL
-except ImportError:
+except Exception:
     pass
 import sys
 import os
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
+
+# Ensure src/ (the directory containing all project modules) is on sys.path.
+# This is needed when the script is launched as a subprocess (e.g. from SSN_Config.py).
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 import h5py
 import numpy as np
 import importlib
@@ -13,7 +19,7 @@ from collections import deque
 import math
 import queue
 from vispy import scene, app
-from PyQt6 import QtWidgets, QtCore
+from PyQt6 import QtWidgets, QtCore, QtGui
 import SSN_Config as cfg
 import SSN_Utils as utils
 import Command_Engine
@@ -89,6 +95,7 @@ class MainViewer:
     def __init__(self):
         # --- 1. Viewer State ---
         self.console_mode = False
+        self.web_action_handlers = {}
         
         # =========================================================================
         # HUD & CONSOLE LAYOUT CONFIGURATION SECTION
@@ -99,7 +106,7 @@ class MainViewer:
         # scaled by the canvas pixel scale (DPI factor) at runtime.
         # =========================================================================
         self.hud_layout = {
-            # 1. Top-left Instructions (" [ENTER] Command | [LeftClick] Label | ... ")
+            # 1. Top-left Instructions (" [ENTER] Command | [LeftClick] Highlight | ... ")
             "instr_x": 10.0,             # Horizontal coordinate from left edge
             "instr_y": 10.0,             # Vertical coordinate from top edge (baseline)
             "instr_anchor_x": "left",    # Horizontal text alignment: 'left', 'center', 'right'
@@ -141,21 +148,27 @@ class MainViewer:
         self.command_history = []
         try:
             cache_path, _ = utils.get_cache_filename()
-            # Extract the parent folder name to share history across all _ver.XX versions
-            folder_name = os.path.basename(os.path.dirname(cache_path))
-            history_filename = f"{folder_name}.txt"
+            cache_dir = os.path.dirname(cache_path)
+            self.history_file = os.path.join(cache_dir, "cli_history.txt")
             
-            # ---> NEW: Fetch the directory from Config <---
-            history_dir = getattr(cfg, 'HISTORY_DIR', os.path.join("Cache_Files", "History"))
-            self.history_file = os.path.join(history_dir, history_filename)
+            # Migration check: if old history exists in Cache_Files/History/folder_name.txt, copy to new location
+            folder_name = os.path.basename(cache_dir)
+            old_history_file = os.path.join("Cache_Files", "History", f"{folder_name}.txt")
+            if not os.path.exists(self.history_file) and os.path.exists(old_history_file):
+                try:
+                    os.makedirs(cache_dir, exist_ok=True)
+                    import shutil
+                    shutil.copy2(old_history_file, self.history_file)
+                except Exception as e:
+                    print(f"Warning: Could not migrate old CLI history: {e}")
             
             if os.path.exists(self.history_file):
                 with open(self.history_file, "r", encoding="utf-8") as f:
                     self.command_history = [line.strip() for line in f if line.strip()]
         except Exception as e:
             print(f"Warning: Could not bind specific history file ({e}). Defaulting format.")
-            history_dir = getattr(cfg, 'HISTORY_DIR', os.path.join("Cache_Files", "History"))
-            self.history_file = os.path.join(history_dir, "command_history.txt")
+            saved_layout_dir = getattr(cfg, 'SAVED_LAYOUT_DIR', os.path.join("Cache_Files", "Saved_Layouts"))
+            self.history_file = os.path.join(saved_layout_dir, "cli_history.txt")
 
         self.history_index = len(self.command_history)
         
@@ -181,6 +194,7 @@ class MainViewer:
         self.is_multi_dragging = False
         self._drag_edges_hidden = False
         self.drag_start_mouse = None
+        self.drag_start_screen = None
         self.drag_start_nodes_pos = None
         self.position_history = []  # Tracks states for Undo
         self.hud_displays = {}
@@ -195,6 +209,7 @@ class MainViewer:
         self.canvas.events.key_press.connect(self.on_key_press)
         self.canvas.events.resize.connect(self.on_resize)
         self.canvas.events.mouse_press.connect(self.on_mouse_press)
+        self.canvas.events.mouse_release.connect(self.on_mouse_release)
         
         # --- NEW: Hook mouse wheel and move for dynamic tooltips and HUD ---
         self.canvas.events.mouse_wheel.connect(self.on_mouse_wheel)
@@ -282,6 +297,13 @@ class MainViewer:
                 utils.force_light_palette(qapp)
             except Exception as e:
                 print(f"Warning: Could not force light palette: {e}")
+            
+            # Set Application-wide Icon (covers Vispy and all spawned windows/dialogs)
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.ico")
+            if not os.path.exists(icon_path):
+                icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.png")
+            if os.path.exists(icon_path):
+                qapp.setWindowIcon(QtGui.QIcon(icon_path))
 
         # Create overlay container widget as a child of the native canvas
         self.slider_overlay = QtWidgets.QWidget(self.canvas.native)
@@ -357,6 +379,14 @@ class MainViewer:
         self._panel_w = 180
         self.main_window = QtWidgets.QMainWindow()
         self.main_window.setWindowTitle("Sequence Similarity Network Viewer")
+        
+        # Set Window Icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.ico")
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.png")
+        if os.path.exists(icon_path):
+            self.main_window.setWindowIcon(QtGui.QIcon(icon_path))
+            
         self.main_window.resize(1200, 800)
         self.main_window.setMinimumWidth(self._panel_w)
         
@@ -382,6 +412,7 @@ class MainViewer:
         self.toggle_sidebar_btn.setFixedWidth(30)
         self.toggle_sidebar_btn.setFixedHeight(30)
         self.toggle_sidebar_btn.clicked.connect(self.toggle_sidebar)
+        self.toggle_sidebar_btn.hide()
         
         # Apply modern premium stylesheet
         self.main_window.setStyleSheet("""
@@ -655,10 +686,6 @@ class MainViewer:
                     base_box = np.sqrt(self.n_nodes) * 2.5 + 5.0
                     self.box_limit = base_box * cfg.BOX_SCALE
                     
-                    print(f"Loaded {self.n_nodes} nodes and {len(self.edges)} edges.")
-                    if getattr(self, 'resolved_ref_full', None):
-                        print(f"Active Reference: {self.resolved_ref_full}")
-
                     raw_loaded = True
 
                 except Exception as e:
@@ -937,6 +964,11 @@ class MainViewer:
         else:
             self.line_visual = None
             
+        self.left_click_highlight = scene.visuals.Markers(parent=self.view.scene)
+        self.left_click_highlight.set_data(pos=np.array([[0.0, 0.0]], dtype=np.float32))
+        self.left_click_highlight.set_gl_state('translucent', depth_test=False)
+        self.left_click_highlight.visible = False
+
         self.markers = scene.visuals.Markers(parent=self.view.scene)
         self.update_nodes()
         
@@ -1113,6 +1145,48 @@ class MainViewer:
                 symbol=shapes[vis].tolist() 
             )
         self.markers.set_gl_state('translucent', depth_test=False)
+        
+        # ---> NEW: Update left-click background highlight if active <---
+        if getattr(self, 'left_click_highlight', None) is not None:
+            indices_to_highlight = []
+            if getattr(self, 'left_click_highlight_indices', None):
+                indices_to_highlight = [idx for idx in self.left_click_highlight_indices if self.visible_mask[idx]]
+            elif getattr(self, 'selected_node_idx', None) is not None:
+                sel_idx = self.selected_node_idx
+                if self.visible_mask[sel_idx]:
+                    indices_to_highlight = [sel_idx]
+            
+            if len(indices_to_highlight) > 0:
+                pos_list = []
+                color_list = []
+                size_list = []
+                symbol_list = []
+                for idx in indices_to_highlight:
+                    shape = shapes[idx] if isinstance(shapes, np.ndarray) else shapes
+                    node_size = sizes[idx] if isinstance(sizes, np.ndarray) else sizes
+                    enlarged_size = node_size * 2.0
+                    
+                    node_color = colors[idx]
+                    highlight_color = node_color.copy()
+                    highlight_color[3] = highlight_color[3] * 0.5
+                    
+                    pos_list.append(self.pos[idx])
+                    color_list.append(highlight_color)
+                    size_list.append(enlarged_size)
+                    symbol_list.append(shape)
+                
+                self.left_click_highlight.set_data(
+                    pos=np.array(pos_list, dtype=np.float32),
+                    face_color=np.array(color_list, dtype=np.float32),
+                    edge_color=np.zeros((len(pos_list), 4), dtype=np.float32),
+                    size=np.array(size_list, dtype=np.float32),
+                    edge_width=np.zeros(len(pos_list), dtype=np.float32),
+                    symbol=symbol_list
+                )
+                self.left_click_highlight.visible = True
+            else:
+                self.left_click_highlight.visible = False
+                
         self.canvas.update()
         
         # ---> NEW: Force HUD to instantly sync whenever visual state changes
@@ -1123,7 +1197,7 @@ class MainViewer:
         scale = getattr(self.canvas, 'pixel_scale', 1.0)
         
         self.instr_text = scene.visuals.Text(
-            text="[ENTER] Command | [LeftClick] Label | [RightClick] Select/Clear | [Scroll] Zoom | [Shift + LeftClick] Copy Node Header | [LeftClick + Drag] Pan | [RightClick + Drag] GroupSelect/MoveNodes",
+            text="[ENTER] Command | [LeftClick] Highlight | [RightClick] Select/Clear | [Scroll] Zoom | [Shift + LeftClick] Copy Node Header | [LeftClick + Drag] Pan | [RightClick + Drag] GroupSelect/MoveNodes",
             bold=False, 
             font_size=8, 
             color='gray', 
@@ -1384,6 +1458,7 @@ class MainViewer:
         # ---> 1. RIGHT-CLICK LOGIC (Drag & Select) <---
         if event.button == 2 and not self.console_mode:
             self.tooltip.text = "" 
+            self.selected_node_idx = None
             
             # Clear or hide registered HUD displays
             for display in self.hud_displays.values():
@@ -1402,6 +1477,7 @@ class MainViewer:
             
             is_node_clicked = screen_dist < cfg.NODE_SIZE
             self.drag_start_mouse = mouse_world
+            self.drag_start_screen = event.pos
             
             if is_node_clicked:
                 self._save_state()
@@ -1464,7 +1540,7 @@ class MainViewer:
             event.handled = True
             return
         
-        # ---> 3. PLAIN LEFT-CLICK LOGIC (Show Label) <---
+        # ---> 3. PLAIN LEFT-CLICK LOGIC (Show Highlight) <---
         if event.button == 1 and 'Shift' not in event.modifiers and not self.console_mode:
             tr = self.canvas.scene.node_transform(self.view.scene)
             mouse_world = tr.map(event.pos)[:2]
@@ -1476,9 +1552,10 @@ class MainViewer:
             node_screen_pos = tr.inverse.map(self.pos[nearest_idx])[:2]
             screen_dist = np.linalg.norm(node_screen_pos - event.pos)
             
-            # If clicked within the node's radius, show the label and print full header
+            # If clicked within the node's radius, highlight the node and print full header
             if screen_dist < cfg.NODE_SIZE:
                 self.selected_node_idx = nearest_idx
+                self.tooltip.text = ""
                 
                 # Row 1: Cluster + Header
                 lbl_line1 = ""
@@ -1496,9 +1573,6 @@ class MainViewer:
                     group_line = f"\n[Groups: {group_str}]"
                     group_print = f" [Groups: {group_str}]"
                 
-                self.tooltip.text = f"{lbl_line1}{group_line}"
-                self.tooltip.pos = node_screen_pos + [15, -15]
-                
                 # Fetch and print the full FASTA header (keep print statement on one line)
                 full_header = self.full_headers[nearest_idx]
                 print(f"Node Selected: {full_header}")
@@ -1515,8 +1589,12 @@ class MainViewer:
                     if getattr(display, 'on_node_clicked', None):
                         display.on_node_clicked(nearest_idx)
                 
-            # Notice there is no 'else:' block here anymore! 
-            # Clicking empty space does nothing, leaving the label intact.
+                self.update_nodes()
+            else:
+                # Clicking empty space clears the left-click highlight
+                self.selected_node_idx = None
+                self.tooltip.text = ""
+                self.update_nodes()
                 
             event.handled = True
             return
@@ -1585,12 +1663,21 @@ class MainViewer:
             self.set_sidebar_visible(visible)
 
     def set_sidebar_visible(self, visible):
+        has_buttons = bool(getattr(self, 'sidebar_buttons', {}))
         if hasattr(self, 'right_panel'):
+            if not has_buttons:
+                self.right_panel.hide()
+                if hasattr(self, 'toggle_sidebar_btn'):
+                    self.toggle_sidebar_btn.hide()
+                self.reposition_expand_btn()
+                return
+
             self.right_panel.setVisible(visible)
             if hasattr(self, 'toggle_sidebar_btn'):
+                self.toggle_sidebar_btn.setVisible(True)
                 self.toggle_sidebar_btn.setText(">>" if visible else "<<")
             self.reposition_expand_btn()
-            
+
             # Immediately update the positions of HUD labels and slider
             if hasattr(self, 'position_slider_overlay'):
                 self.position_slider_overlay()
@@ -1599,7 +1686,7 @@ class MainViewer:
 
     def open_metadata_ui(self):
         import webbrowser
-        webbrowser.open("http://localhost:8000/metadata.html")
+        webbrowser.open("http://localhost:8000/meta.html")
 
     def open_agent_ui(self):
         import webbrowser
@@ -1646,6 +1733,13 @@ class MainViewer:
                 queues = list(self.web_server.event_queues)
             for q in queues:
                 q.put(event)
+
+    def handle_web_action(self, data):
+        action = data.get("action")
+        if action in self.web_action_handlers:
+            self.web_action_handlers[action](data)
+        else:
+            print(f"Warning: No handler registered for web action '{action}'")
 
     def get_serializable_metadata(self):
         rows = []
@@ -1811,7 +1905,15 @@ class MainViewer:
             x0, y0 = self.drag_start_mouse
             x1, y1 = mouse_world
             
-            if getattr(cfg, 'LOW_RESOURCE_MODE', False) and np.hypot(x1 - x0, y1 - y0) >= 1.0:
+            # Calculate drag distance in screen coordinates (pixels)
+            drag_start_screen = getattr(self, 'drag_start_screen', None)
+            if drag_start_screen is None:
+                drag_start_screen = event.pos
+            dx = event.pos[0] - drag_start_screen[0]
+            dy = event.pos[1] - drag_start_screen[1]
+            drag_dist_screen = np.hypot(dx, dy)
+            
+            if getattr(cfg, 'LOW_RESOURCE_MODE', False) and drag_dist_screen >= 5.0:
                 min_x, max_x = min(x0, x1), max(x0, x1)
                 min_y, max_y = min(y0, y1), max(y0, y1)
                 xs = self.pos[:, 0]
@@ -1831,8 +1933,8 @@ class MainViewer:
                 self.selected_indices = list(current_selection)
                 self.update_selection_visual()
                 
-            # Single click detection (no drag distance)
-            if np.hypot(x1 - x0, y1 - y0) < 1.0:
+            # Single click detection (no drag distance in screen pixels)
+            if drag_dist_screen < 5.0:
                 if 'Shift' not in event.modifiers and 'Control' not in event.modifiers and 'Meta' not in event.modifiers:
                     self.selected_indices = []
                     self.update_selection_visual()
@@ -1849,3 +1951,5 @@ class MainViewer:
 if __name__ == '__main__':
     viewer = MainViewer()
     app.run()
+
+

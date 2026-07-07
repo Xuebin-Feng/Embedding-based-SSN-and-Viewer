@@ -3,8 +3,7 @@ import threading
 import queue
 import json
 import os
-import numpy as np
-from PyQt6 import QtCore, QtGui
+from PyQt6 import QtCore
 
 class QtCommunicator(QtCore.QObject):
     action_signal = QtCore.pyqtSignal(dict)
@@ -19,82 +18,9 @@ class QtCommunicator(QtCore.QObject):
         self.action_signal.emit(data)
         
     def dispatch_action(self, data):
-        action = data.get("action")
-        if action == "select":
-            indices = data.get("indices", [])
-            self.viewer.selected_indices = list(indices)
-            self.viewer.update_selection_visual()
-            self.viewer.canvas.update()
-        elif action == "edit_cell":
-            row = data.get("row")
-            col = data.get("column")
-            value = data.get("value")
-            
-            meta_entry = self.viewer.metadata.get(col)
-            if meta_entry:
-                prop_type = meta_entry["type"]
-                if prop_type == "number":
-                    try:
-                        if str(value).strip() == "":
-                            parsed_val = np.nan
-                        else:
-                            parsed_val = float(value)
-                    except ValueError:
-                        return
-                else:
-                    parsed_val = str(value)
-                
-                meta_entry["values"][row] = parsed_val
-                # Trigger a redraw of nodes/labels in case they are colored by this metadata
-                self.viewer.update_nodes()
-                self.viewer.canvas.update()
-                
-                # Auto-save layout cache on edit
-                try:
-                    import SSN_Utils as utils
-                    cache_path, _ = utils.get_cache_filename()
-                    import h5py
-                    if os.path.exists(cache_path):
-                        with h5py.File(cache_path, "a") as hf:
-                            if "metadata" in hf:
-                                meta_group = hf["metadata"]
-                                if col in meta_group:
-                                    del meta_group[col]
-                                ds = meta_group.create_dataset(col, data=meta_entry["values"], compression="gzip")
-                                ds.attrs["type"] = prop_type
-                        print(f"Metadata cell [{row}, {col}] auto-saved to cache.")
-                except Exception as e:
-                    print(f"Warning: Failed to auto-save metadata edit: {e}")
-                    
-        elif action == "agent_query":
-            query = data.get("query")
-            # Run Agent LLM execution!
-            import commands.agent as agent_cmd
-            agent_cmd.run_web_agent_query(self.viewer, query)
-            
-        elif action == "set_backend":
-            backend_idx = data.get("index")
-            import commands.agent as agent_cmd
-            if backend_idx == 0:
-                agent_cmd.deactivate_agent(self.viewer, quiet=True)
-            elif backend_idx == 1:
-                agent_cmd.activate_agent(self.viewer, force_backend="api", quiet=True)
-            elif backend_idx == 2:
-                agent_cmd.activate_agent(self.viewer, force_backend="local", quiet=True)
-            
-            # Broadcast backend state updated
-            self.viewer.broadcast_event({
-                "type": "backend_state",
-                "llm_loaded": getattr(self.viewer, 'llm_loaded', False),
-                "llm_backend": getattr(self.viewer, 'llm_backend', None),
-                "llm_model_name": getattr(self.viewer, 'llm_model_name', "Unknown")
-            })
-        elif action == "clear_history":
-            if hasattr(self.viewer, 'llm_history'):
-                self.viewer.llm_history = []
-            if not hasattr(self.viewer, '_cacheable_attrs'):
-                self.viewer._cacheable_attrs = set()
-            self.viewer._cacheable_attrs.add("llm_history")
+        # Delegate all web action execution to the viewer's registered action handlers
+        if hasattr(self.viewer, "handle_web_action"):
+            self.viewer.handle_web_action(data)
 
 class ThreadSafeHTTPServer(http.server.ThreadingHTTPServer):
     def __init__(self, server_address, RequestHandlerClass, viewer):
@@ -102,6 +28,7 @@ class ThreadSafeHTTPServer(http.server.ThreadingHTTPServer):
         self.viewer = viewer
         self.event_queues = []
         self.queues_lock = threading.Lock()
+        self.static_routes = {}  # prefix -> local_dir (registered by dynamic backends)
 
     def handle_error(self, request, client_address):
         # Suppress traceback print for socket/connection abortions when browser tabs close
@@ -111,7 +38,7 @@ class ThreadSafeHTTPServer(http.server.ThreadingHTTPServer):
             return
         super().handle_error(request, client_address)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # src/web_ui/
 
 class WebServerHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -128,7 +55,26 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         if clean_path == "/" or clean_path == "":
             clean_path = "/index.html"
 
-        # Prevent directory traversal
+        # Check dynamically registered static routes first (e.g. for agent files)
+        for route_prefix, local_dir in self.server.static_routes.items():
+            if clean_path.startswith(route_prefix):
+                rel = clean_path[len(route_prefix):]
+                normalized = os.path.normpath(rel)
+                if normalized.startswith("..") or os.path.isabs(normalized):
+                    self.send_error(403, "Forbidden")
+                    return
+                filepath = os.path.normpath(os.path.join(local_dir, normalized))
+                if not filepath.startswith(os.path.normpath(local_dir)):
+                    self.send_error(403, "Forbidden")
+                    return
+                if not os.path.isfile(filepath):
+                    self.send_error(404, "File Not Found")
+                    return
+                ext = os.path.splitext(filepath)[1].lower()
+                self.serve_file(filepath, {".json": "application/json", ".md": "text/plain"}.get(ext, "application/octet-stream"))
+                return
+
+        # Fallback to serving public files inside BASE_DIR (src/web_ui)
         safe_rel_path = clean_path.lstrip("/")
         normalized = os.path.normpath(safe_rel_path)
         if normalized.startswith("..") or os.path.isabs(normalized):
@@ -136,7 +82,6 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             return
 
         filepath = os.path.normpath(os.path.join(BASE_DIR, normalized))
-        # Ensure the resolved file path is physically inside BASE_DIR
         if not filepath.startswith(os.path.normpath(BASE_DIR)):
             self.send_error(403, "Forbidden")
             return

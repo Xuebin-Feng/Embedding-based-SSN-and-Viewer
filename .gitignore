@@ -7,15 +7,15 @@ manual_tools/
 VR_Viewer/
 
 # User-specified files
-web_ui/agent_resource/api_secrets.json
-web_ui/agent_resource/evaluate_agent.py
-*.gguf
+src/resources/agent/model_card.json
+src/resources/agent/evaluate_agent.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
 *$py.class
 .vscode/
+.agent/
 
 # C extensions
 *.so
@@ -230,3 +230,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated Windows Shortcuts & Icons
+*.lnk
+*.ico

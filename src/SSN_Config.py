@@ -25,7 +25,6 @@ PRINT_SAVE_DIR = os.path.join("Results", "Saved_Images")
 FASTA_SPLIT_DIR = os.path.join("Cache_Files", "FASTA_Split")
 CLUSTER_LABEL_DIR = os.path.join("Results", "Cluster_Label")
 HEADER_LIST_DIR = os.path.join("Cache_Files", "Header_Lists")
-HISTORY_DIR = os.path.join("Cache_Files", "History")
 LOGO_DIR = os.path.join("Results", "Sequence_Logos")
 
 # --- Explicit Input File Paths ---
@@ -127,6 +126,7 @@ if os.path.exists(SETTINGS_FILE):
 if __name__ == "__main__":
     import sys
     import subprocess
+
     os.environ["QT_API"] = "pyqt6"
     os.environ["QT_MAC_WANTS_LIGHT_THEME"] = "1"
     from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -135,48 +135,69 @@ if __name__ == "__main__":
                                  QLabel, QSplitter, QSlider, QSpinBox, QDoubleSpinBox,
                                  QStyle, QStyleOptionSlider, QFileDialog, QColorDialog)
     from PyQt6.QtCore import Qt, QUrl
-    from PyQt6.QtGui import QDesktopServices
+    from PyQt6.QtGui import QDesktopServices, QIcon
     
     # --- Custom Widget Classes ---
     class NoScrollComboBox(QComboBox):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        def wheelEvent(self, e):
-            e.ignore()
-
+            
+        def wheelEvent(self, event):
+            if not self.hasFocus():
+                event.ignore()
+            else:
+                super().wheelEvent(event)
+                
     class DynamicComboBox(NoScrollComboBox):
         def __init__(self, refresh_callback, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.refresh_callback = refresh_callback
+            
         def showPopup(self):
             if self.refresh_callback:
                 self.refresh_callback()
             super().showPopup()
-
+            
     class NoScrollSpinBox(QSpinBox):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        def wheelEvent(self, e):
-            e.ignore()
-
+            
+        def wheelEvent(self, event):
+            if not self.hasFocus():
+                event.ignore()
+            else:
+                super().wheelEvent(event)
+                
     class NoScrollDoubleSpinBox(QDoubleSpinBox):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        def wheelEvent(self, e):
-            e.ignore()
-
+            
+        def wheelEvent(self, event):
+            if not self.hasFocus():
+                event.ignore()
+            else:
+                super().wheelEvent(event)
+                
     class NoScrollSlider(QSlider):
-        def wheelEvent(self, e):
-            e.ignore()
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            
+        def wheelEvent(self, event):
+            if not self.hasFocus():
+                event.ignore()
+            else:
+                super().wheelEvent(event)
+                
         def mousePressEvent(self, event):
             if event.button() == Qt.MouseButton.LeftButton:
                 opt = QStyleOptionSlider()
                 self.initStyleOption(opt)
-                sr = self.style().subControlRect(QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, self)
-                if not sr.contains(event.pos()):
+                sr = self.style().subControlRect(QStyle.SubControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, self)
+                if not sr.contains(event.position().toPoint()):
                     val = self.style().sliderValueFromPosition(self.minimum(), self.maximum(), int(event.position().x()), self.width())
                     self.setValue(val)
                     event.accept()
@@ -187,6 +208,14 @@ if __name__ == "__main__":
         def __init__(self):
             super().__init__()
             self.setWindowTitle("SSN Configuration Editor")
+            
+            # Set Window Icon
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.ico")
+            if not os.path.exists(icon_path):
+                icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.png")
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+                
             self.resize(1000, 650)
             
             self.central_widget = QWidget()
@@ -441,7 +470,6 @@ if __name__ == "__main__":
                 "FASTA_SPLIT_DIR": "Directory where dynamically split or extracted sequence subset FASTA files are temporarily stored.\nUsed by clustering tools when analyzing specific sub-clusters or regions of the network.",
                 "CLUSTER_LABEL_DIR": "Directory where exported cluster metadata, sequence IDs, and automatically generated label descriptions are saved.\nUseful for downstream annotation pipelines or manual network inspection.",
                 "HEADER_LIST_DIR": "Directory containing text files with lists of sequence headers matching specific network filtering or query criteria.\nUsed to keep track of interesting sequence cohorts identified in the visualizer.",
-                "HISTORY_DIR": "Directory where command history log files (.txt) are stored for each analyzed network.\nUsed by the console system to restore previous command lines across session restarts.",
                 "LOGO_DIR": "Directory where exported sequence logos (representing positional consensus sequence conservation) are saved.\nTypically saved in PNG or vector format for research publication and presentation.",
                 "TARGET_CACHE_FILE": "Selects a specific saved network coordinate cache file from the target directory to load into the visualizer.\nAllows restoring previous layout configurations or comparing different layout iterations directly.",
                 "NEW_CACHE_NAME": "Specifies a custom filename when saving a new layout configuration iteration.\nOnly editable when the 'Selected Cache File' dropdown is set to '(New Layout Cache)'."
@@ -1665,7 +1693,7 @@ if __name__ == "__main__":
             
             # Added FASTA_DIR and HDF5_DIR
             keys = ["FASTA_DIR", "MSA_DIR", "HDF5_DIR", "SAVED_LAYOUT_DIR", "METADATA_DIR", "PRINT_SAVE_DIR", 
-                    "FASTA_SPLIT_DIR", "CLUSTER_LABEL_DIR", "HEADER_LIST_DIR", "HISTORY_DIR", "LOGO_DIR"]
+                    "FASTA_SPLIT_DIR", "CLUSTER_LABEL_DIR", "HEADER_LIST_DIR", "LOGO_DIR"]
             
             for key in keys:
                 container = QWidget()
@@ -1779,26 +1807,34 @@ if __name__ == "__main__":
                 elif selected_cache:
                     env["SSN_TARGET_CACHE"] = selected_cache
                         
-                # Resolve script directory to ensure SSN_Viewer.py is launched from the correct working directory
-                script_dir = os.path.dirname(os.path.abspath(__file__))
+                # Use the project root (parent of src/) as cwd so all relative data paths resolve correctly
+                script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 
                 if sys.platform == "win32":
                     creationflags = subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0x10
                     subprocess.Popen(
-                        f'cmd.exe /c ""{sys.executable}" SSN_Viewer.py || pause"', 
+                        f'cmd.exe /c ""{sys.executable}" src\\SSN_Viewer.py || pause"', 
                         env=env, 
                         creationflags=creationflags, 
                         cwd=script_dir
                     )
                 else:
                     # GUI applications do not need a terminal window on macOS/Linux and run fine as detached processes
-                    subprocess.Popen([sys.executable, "SSN_Viewer.py"], env=env, cwd=script_dir)
+                    subprocess.Popen([sys.executable, os.path.join("src", "SSN_Viewer.py")], env=env, cwd=script_dir)
 
         def save_only(self):
             if self.save_settings():
                 QMessageBox.information(self, "Success", "Settings saved successfully!")
 
     app = QApplication(sys.argv)
+    
+    # Set Application-wide Icon
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.ico")
+    if not os.path.exists(icon_path):
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "logos", "viewer_logo.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        
     try:
         from SSN_Utils import force_light_palette
         force_light_palette(app)
