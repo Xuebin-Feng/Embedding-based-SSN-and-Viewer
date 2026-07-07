@@ -234,3 +234,4 @@ __marimo__/
 # Generated Windows Shortcuts & Icons
 *.lnk
 *.ico
+!src/bin/logos/*.ico

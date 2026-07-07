@@ -11,20 +11,32 @@ set "PROJECT_ROOT=%CD%"
 echo Setting up shortcuts for SSN Viewer and SSN Tools...
 echo Project root: !PROJECT_ROOT!
 
-:: 1. Define icon paths
+:: 1. Auto-generate .ico files from .png if they are missing
+if not exist "src\bin\logos\viewer_logo_large.ico" (
+    echo Icon files are missing. Attempting to generate them...
+    set "PY_EXE=.venv\Scripts\python.exe"
+    if exist "!PY_EXE!" (
+        "!PY_EXE!" -c "import sys, os; from PyQt6.QtWidgets import QApplication; from PyQt6.QtGui import QPixmap; app = QApplication(sys.argv); logo_dir = r'src/bin/logos'; [QPixmap(os.path.join(logo_dir, f)).save(os.path.join(logo_dir, os.path.splitext(f)[0] + '.ico'), 'ICO') for f in os.listdir(logo_dir) if f.endswith('.png')]"
+        echo [OK] Generated .ico files from png files.
+    ) else (
+        echo [INFO] Python virtual environment not found. Please run SSN_Viewer.bat or SSN_Tools.bat once first to set up the environment, or ensure the .ico files are synced.
+    )
+)
+
+:: 2. Define icon paths
 set "VIEWER_ICON=!PROJECT_ROOT!\src\bin\logos\viewer_logo_large.ico"
 set "TOOL_ICON=!PROJECT_ROOT!\src\bin\logos\tool_logo_large.ico"
 
 :: 2. Create Windows Shortcut for SSN_Viewer.bat in the root folder
 echo Creating shortcut for SSN_Viewer...
-powershell -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('!PROJECT_ROOT!\SSN_Viewer.lnk'); $Shortcut.TargetPath = '!PROJECT_ROOT!\src\bin\SSN_Viewer.bat'; $Shortcut.WorkingDirectory = '!PROJECT_ROOT!'; $Shortcut.IconLocation = '!VIEWER_ICON!'; $Shortcut.Save();"
+powershell -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut($env:PROJECT_ROOT + '\SSN_Viewer.lnk'); $Shortcut.TargetPath = $env:PROJECT_ROOT + '\src\bin\SSN_Viewer.bat'; $Shortcut.WorkingDirectory = $env:PROJECT_ROOT; $Shortcut.IconLocation = $env:VIEWER_ICON; $Shortcut.Save();"
 if exist "SSN_Viewer.lnk" (
     echo [OK] Created SSN_Viewer.lnk in project root.
 )
 
 :: 3. Create Windows Shortcut for SSN_Tools.bat in the root folder
 echo Creating shortcut for SSN_Tools...
-powershell -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('!PROJECT_ROOT!\SSN_Tools.lnk'); $Shortcut.TargetPath = '!PROJECT_ROOT!\src\bin\SSN_Tools.bat'; $Shortcut.WorkingDirectory = '!PROJECT_ROOT!'; $Shortcut.IconLocation = '!TOOL_ICON!'; $Shortcut.Save();"
+powershell -ExecutionPolicy Bypass -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut($env:PROJECT_ROOT + '\SSN_Tools.lnk'); $Shortcut.TargetPath = $env:PROJECT_ROOT + '\src\bin\SSN_Tools.bat'; $Shortcut.WorkingDirectory = $env:PROJECT_ROOT; $Shortcut.IconLocation = $env:TOOL_ICON; $Shortcut.Save();"
 if exist "SSN_Tools.lnk" (
     echo [OK] Created SSN_Tools.lnk in project root.
 )
