@@ -80,8 +80,9 @@ The pipeline supports two primary pathways for Sequence Similarity Network (SSN)
      > It is highly recommended to enable **Developer Mode** in your Windows Settings (Search for "Developer settings" in Windows). This allows symbolic links to be created without elevation, which is required by the Hugging Face `transformers` cache model download system to avoid duplicating file storage.
      
    * **🍏 macOS**:
-     Before double-clicking `install.command` for the first time, you must grant it execution permissions via the terminal:
+     Before double-clicking `install.command` for the first time, you must navigate to the project directory in your terminal and grant it execution permissions:
      ```bash
+     cd Sequence_Similarity_Network_Viewer
      chmod +x install.command
      ```
      Once granted, double-click `install.command` in the project root to configure permissions for scripts in `src/bin/` and generate double-clickable `.command` launchers (`SSN_Viewer.command` and `SSN_Tools.command`) in the project root.
@@ -126,6 +127,7 @@ Sequence_Similarity_Network_Viewer/
 │
 ├── docs/                     # Documentation screenshots and descriptions
 ├── Input_Files/              # Raw input sequence FASTA files
+├── Cache_Files/              # Cached layouts, metadata, splits, and lists
 ├── Embeddings/               # Directory where ESM protein embeddings are cached
 └── Results/                  # Visual outputs, exported graphs, and layouts
 ```
