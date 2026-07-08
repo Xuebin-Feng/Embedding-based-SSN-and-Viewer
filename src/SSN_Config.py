@@ -1639,6 +1639,18 @@ if __name__ == "__main__":
             temp_layout.addWidget(noise_scale_container)
             form_layout.addRow(temp_row)
             
+            # Apply styling for disabled states to match other tabs
+            disabled_lineedit_style = "QLineEdit:disabled { background-color: #f0f0f0; color: #888; }"
+            disabled_label_style = "QLabel:disabled { color: #888; }"
+            le_min_k.setStyleSheet(disabled_lineedit_style)
+            le_pct_k.setStyleSheet(disabled_lineedit_style)
+            le_start_temp.setStyleSheet(disabled_lineedit_style)
+            le_noise_scale.setStyleSheet(disabled_lineedit_style)
+            lbl_min_k.setStyleSheet(disabled_label_style)
+            lbl_pct_k.setStyleSheet(disabled_label_style)
+            lbl_start_temp.setStyleSheet(disabled_label_style)
+            lbl_noise_scale.setStyleSheet(disabled_label_style)
+            
             # --- Toggle Dependencies Function ---
             def update_engine_ui():
                 is_mc = cb_engine.currentText() == "Monte Carlo (Style)"
