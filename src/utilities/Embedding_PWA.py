@@ -58,7 +58,7 @@ import json
 import ast
 
 # Automatically calculate the root directory of the SSN project for the current PC
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SETTINGS_FILE = os.path.join(PROJECT_ROOT, "Input_Files", "tools_settings.json")
 
 if os.path.exists(SETTINGS_FILE):
