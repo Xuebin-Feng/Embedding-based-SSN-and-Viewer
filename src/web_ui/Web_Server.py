@@ -40,6 +40,20 @@ class ThreadSafeHTTPServer(http.server.ThreadingHTTPServer):
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # src/web_ui/
 
+MIME_TYPES = {
+    ".html": "text/html",
+    ".css": "text/css",
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".md": "text/plain"
+}
+
 class WebServerHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Silences console log spam
@@ -71,7 +85,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error(404, "File Not Found")
                     return
                 ext = os.path.splitext(filepath)[1].lower()
-                self.serve_file(filepath, {".json": "application/json", ".md": "text/plain"}.get(ext, "application/octet-stream"))
+                self.serve_file(filepath, MIME_TYPES.get(ext, "application/octet-stream"))
                 return
 
         # Fallback to serving public files inside BASE_DIR (src/web_ui)
@@ -92,19 +106,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
         # Determine MIME type dynamically
         ext = os.path.splitext(filepath)[1].lower()
-        mime_types = {
-            ".html": "text/html",
-            ".css": "text/css",
-            ".js": "application/javascript",
-            ".json": "application/json",
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".svg": "image/svg+xml",
-            ".gif": "image/gif",
-            ".ico": "image/x-icon"
-        }
-        content_type = mime_types.get(ext, "application/octet-stream")
+        content_type = MIME_TYPES.get(ext, "application/octet-stream")
         self.serve_file(filepath, content_type)
 
     def serve_file(self, filepath, content_type):
