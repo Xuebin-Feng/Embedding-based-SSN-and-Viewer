@@ -9,6 +9,35 @@ import re
 
 MAX_CORES = os.cpu_count() or 16
 
+def get_supported_embedding_models():
+    """
+    Scans the src/resources/embedding_models/ folder and parses all scripts
+    statically via AST to dynamically build the list of supported embedding models.
+    """
+    import glob
+    models = []
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    plugin_dir = os.path.join(current_dir, "resources", "embedding_models")
+    if os.path.exists(plugin_dir):
+        for filepath in glob.glob(os.path.join(plugin_dir, "*.py")):
+            if os.path.basename(filepath) == "__init__.py":
+                continue
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    node = ast.parse(f.read(), filename=filepath)
+                for item in node.body:
+                    if isinstance(item, ast.Assign):
+                        for target in item.targets:
+                            if isinstance(target, ast.Name) and target.id == "SUPPORTED_MODELS":
+                                val = ast.literal_eval(item.value)
+                                if isinstance(val, list):
+                                    models.extend(val)
+            except Exception:
+                pass
+    if not models:
+        models = ["esmc_300m", "esmc_600m", "prot_bert", "ProstT5"]
+    return models
+
 # Ensure src/ (the directory containing all project modules) is on sys.path.
 # This is needed when the script is run as a subprocess or from a different working directory.
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -493,7 +522,7 @@ class ToolsGUI(QMainWindow):
                         {
                             "var_name": "MODEL_NAME",
                             "type": "dropdown",
-                            "options": ["esmc_300m", "esmc_600m", "prot_bert", "ProstT5"],
+                            "options": get_supported_embedding_models(),
                             "display": "Model Name:"
                         },
                         {

@@ -101,12 +101,7 @@ FULL_INPUT_FASTA = os.path.join(FASTA_DIR, INPUT_FASTA) if FASTA_DIR and INPUT_F
 SEQUENCE_SET = INPUT_FASTA.replace(".fasta", "") if INPUT_FASTA else "Unknown_Set"
 OUTPUT_HDF5 = os.path.join(EMBED_DIR, f"{SEQUENCE_SET}_[{MODEL_NAME}]_embeddings.h5") if EMBED_DIR else ""
 
-# Import Embedding Models
-if "esmc" in str(MODEL_NAME):    
-    from esm.models.esmc import ESMC
-    from esm.sdk.api import ESMProtein, LogitsConfig
-else:
-    from transformers import BertTokenizer, BertModel, T5Tokenizer, T5EncoderModel
+# Embedding model imports are deferred to dynamic plugin scripts under src/resources/embedding_models/
 
 # Helper function
 def read_fasta(file_path):
@@ -139,52 +134,45 @@ def read_fasta(file_path):
 # OPTIMIZED EMBEDDING (GPU/CPU)
 # ==========================================
 
-def load_model(model_name):
-    device = Hardware_Utils.get_optimal_device()
-    print(f"Loading {model_name} on {device}...")
+def find_model_plugin(model_name):
+    """
+    Dynamically locates and loads the plugin script supporting the selected model_name.
+    Uses AST to inspect supported models statically to avoid running code of non-matching plugins.
+    """
+    import ast
+    import glob
+    import importlib.util
 
-    if "esmc" in model_name:
-        client = ESMC.from_pretrained(model_name).to(device)
-        return client, device, "esmc"
-    elif "prot_bert" in model_name:
-        tokenizer = BertTokenizer.from_pretrained(f"Rostlab/{model_name}", do_lower_case=False)
-        model = BertModel.from_pretrained(f"Rostlab/{model_name}").to(device)
-        model.eval()
-        return (tokenizer, model), device, "bert"
-    elif "ProstT5" in model_name:
-        tokenizer = T5Tokenizer.from_pretrained(f"Rostlab/{model_name}_fp16", do_lower_case=False)
-        model = T5EncoderModel.from_pretrained(f"Rostlab/{model_name}_fp16").to(device)
-        return (tokenizer, model), device, "t5"
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    plugin_dir = os.path.abspath(os.path.join(current_dir, "..", "resources", "embedding_models"))
 
-def get_embedding(seq, model_obj, device, model_type, target_dtype):
-    seq = seq.upper()
-    match = re.search(r'[ACDEFGHIKLMNPQRSTVWYBZJXUO].*[ACDEFGHIKLMNPQRSTVWYBZJXUO]|[ACDEFGHIKLMNPQRSTVWYBZJXUO]', seq)
-    seq = match.group(0) if match else ""
-    
-    if model_type == "esmc":
-        seq = re.sub(r'[^ACDEFGHIKLMNPQRSTVWY\-]', '-', seq)
-    elif model_type in ["bert", "t5"]:
-        seq = re.sub(r'[^ACDEFGHIKLMNPQRSTVWYBZJXUO\-]', 'X', seq)
-        seq = re.sub(r'[BZUO]', 'X', seq) 
+    if not os.path.exists(plugin_dir):
+        raise FileNotFoundError(f"Plugin directory not found: {plugin_dir}")
 
-    with torch.no_grad():
-        if model_type == "esmc":
-            protein_tensor = model_obj.encode(ESMProtein(sequence=seq))
-            logits = model_obj.logits(protein_tensor, LogitsConfig(sequence=True, return_embeddings=True))
-            return logits.embeddings.squeeze(0)[1:-1].cpu().numpy().astype(target_dtype)
-        elif model_type == "bert":
-            tokenizer, model = model_obj
-            spaced_seq = " ".join(list(seq))
-            inputs = tokenizer(spaced_seq, return_tensors="pt").to(device)
-            outputs = model(**inputs)
-            return outputs.last_hidden_state[0, 1:-1].cpu().numpy().astype(target_dtype)
-        elif model_type == "t5":
-            tokenizer, model = model_obj
-            spaced_seq = " ".join(list(seq))
-            input_seq = "<AA2fold> " + spaced_seq
-            inputs = tokenizer(input_seq, return_tensors="pt").to(device)
-            outputs = model(**inputs)
-            return outputs.last_hidden_state[0, 1:-1].cpu().numpy().astype(target_dtype)
+    for filepath in glob.glob(os.path.join(plugin_dir, "*.py")):
+        if os.path.basename(filepath) == "__init__.py":
+            continue
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                node = ast.parse(f.read(), filename=filepath)
+            
+            supported_models = []
+            for item in node.body:
+                if isinstance(item, ast.Assign):
+                    for target in item.targets:
+                        if isinstance(target, ast.Name) and target.id == "SUPPORTED_MODELS":
+                            supported_models = ast.literal_eval(item.value)
+                            break
+            
+            if model_name in supported_models:
+                module_name = os.path.splitext(os.path.basename(filepath))[0]
+                spec = importlib.util.spec_from_file_location(module_name, filepath)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module
+        except Exception as e:
+            print(f"Warning: Failed to parse/load plugin {filepath}: {e}")
+    return None
 
 # %% =======================================
 # MAIN EXECUTION
@@ -237,12 +225,17 @@ if __name__ == "__main__":
             else:
                 print(f"🚀 Starting fresh embedding generation for {len(pending_headers)} sequences.")
                 
-            # 4. Load Model (Only if we actually have work to do!)
-            model_obj, device, model_type = load_model(MODEL_NAME)
+            # 4. Find and Load Model Plugin (Only if we actually have work to do!)
+            plugin = find_model_plugin(MODEL_NAME)
+            if plugin is None:
+                raise ValueError(f"Model '{MODEL_NAME}' is not supported by any available plugin in 'embedding_models'.")
+            
+            device = Hardware_Utils.get_optimal_device()
+            model_obj = plugin.load_model(MODEL_NAME, device)
             
             # 5. Generate & Save Loop
             for header, seq in tqdm(zip(pending_headers, pending_seqs), total=len(pending_headers), desc="Embedding"):
-                emb = get_embedding(seq, model_obj, device, model_type, target_dtype)
+                emb = plugin.get_embedding(seq, model_obj, device, target_dtype)
                 emb_group.create_dataset(header, data=emb)
         
         # 6. Finalize Metadata (Overwriting to ensure the master list perfectly matches the current FASTA file)
