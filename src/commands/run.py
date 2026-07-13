@@ -4,7 +4,14 @@ from PyQt6 import QtWidgets
 
 def run(viewer, args):
     if args and args[0].lower() in ['help', '-h', '--help']:
-        msg = "Usage: run\nDescription: Opens a file explorer to select a .txt file containing a list of commands, and executes them in sequence.\nExample:\n  run"
+        msg = (
+            "Usage: run\n"
+            "Description: Opens a file explorer to select a command script file (.txt or .py) and executes the commands in sequence.\n"
+            "  - For .txt files: Executes each line as a command.\n"
+            "  - For .py files: Executes the Python script in a subprocess and runs the commands outputted to stdout.\n"
+            "Example:\n"
+            "  run"
+        )
         Command_Engine.print_help(viewer, msg)
         return
 

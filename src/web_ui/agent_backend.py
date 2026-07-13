@@ -490,6 +490,17 @@ def on_web_worker_finished(viewer, query, translated_output, reasoning, tokens_j
 
     terminal_output = "\n".join(captured_outputs) if captured_outputs else ""
 
+    # Set requests count to 1 for the initial step
+    if tokens_json:
+        try:
+            t = json.loads(tokens_json)
+            t["requests"] = 1
+            tokens_json = json.dumps(t)
+        except Exception:
+            pass
+    else:
+        tokens_json = json.dumps({"prompt": 0, "completion": 0, "total": 0, "requests": 1})
+
     if not terminal_output:
         save_and_broadcast_agent_response(viewer, query, explanation_str, commands_str, "", tokens_json, reasoning)
     else:
@@ -540,17 +551,17 @@ def start_refinement_worker(viewer, query, original_explanation, commands, termi
     def on_refinement_finished(refined_explanation, refinement_reasoning, refinement_tokens_json, err):
         final_explanation  = refined_explanation if not err and refined_explanation else original_explanation
         combined_tokens_json = initial_tokens_json
-        if refinement_tokens_json:
-            try:
-                t1 = json.loads(initial_tokens_json) if initial_tokens_json else {}
-                t2 = json.loads(refinement_tokens_json)
-                combined_tokens_json = json.dumps({
-                    "prompt":     t1.get("prompt", 0)     + t2.get("prompt", 0),
-                    "completion": t1.get("completion", 0) + t2.get("completion", 0),
-                    "total":      t1.get("total", 0)      + t2.get("total", 0)
-                })
-            except Exception:
-                pass
+        try:
+            t1 = json.loads(initial_tokens_json) if initial_tokens_json else {}
+            t2 = json.loads(refinement_tokens_json) if refinement_tokens_json else {}
+            combined_tokens_json = json.dumps({
+                "prompt":     t1.get("prompt", 0)     + t2.get("prompt", 0),
+                "completion": t1.get("completion", 0) + t2.get("completion", 0),
+                "total":      t1.get("total", 0)      + t2.get("total", 0),
+                "requests":   2
+            })
+        except Exception:
+            pass
 
         combined_reasoning = original_reasoning
         if refinement_reasoning:

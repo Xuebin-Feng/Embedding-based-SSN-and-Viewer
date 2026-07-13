@@ -2,6 +2,42 @@ import Command_Engine
 import numpy as np
 import matplotlib.pyplot as plt
 import SSN_Utils as utils
+import sys
+import os
+import colorsys
+import math
+
+if sys.platform == 'win32':
+    os.system('')
+
+def get_colored_cluster_name(cid, name_str, color_map=None):
+    if cid == -1:
+        # Grey for noise
+        r, g, b = 204, 204, 204
+    elif color_map and cid in color_map:
+        rgba = color_map[cid]
+        r, g, b = int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)
+    else:
+        r, g, b = 180, 180, 180
+    return f"\033[38;2;{r};{g};{b}m{name_str}\033[0m"
+
+def get_combined_colors(n_clusters):
+    if n_clusters <= 0:
+        return []
+    shades_per_hue = math.ceil(n_clusters / 12)
+    n_hues = math.ceil(n_clusters / shades_per_hue)
+    colors = []
+    for s_idx in range(shades_per_hue):
+        for h_idx in range(n_hues):
+            hue = h_idx / n_hues
+            if shades_per_hue == 1:
+                lightness = 0.65
+            else:
+                lightness = 0.58 + (s_idx / (shades_per_hue - 1)) * 0.27
+            saturation = 0.65
+            rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+            colors.append(rgb)
+    return colors
 
 def print_help():
     print("""
@@ -62,8 +98,17 @@ def run(viewer, args):
         unique_labels, counts = np.unique(labels, return_counts=True)
         label_counts = dict(zip(unique_labels, counts))
         
+        sorted_clusters = sorted([k for k in label_counts.keys() if k != -1])
+        n_clusters = len(sorted_clusters)
+        if n_clusters > 0:
+            combined_colors = get_combined_colors(n_clusters)
+            color_map = {cid: combined_colors[idx % len(combined_colors)] for idx, cid in enumerate(sorted_clusters)}
+        else:
+            color_map = {}
+            
         noise_count = label_counts.get(-1, 0)
-        print(f"Noise (Unclustered): {noise_count} nodes ({noise_count/n_nodes*100:.2f}%)")
+        noise_colored = get_colored_cluster_name(-1, "Noise (Unclustered)", color_map)
+        print(f"{noise_colored}: {noise_count} nodes ({noise_count/n_nodes*100:.2f}%)")
         
         print(f"\n{'='*52}")
         print(f"--- Current Cluster Statistics (Total: {n_nodes}) ---")
@@ -73,13 +118,14 @@ def run(viewer, args):
         
         noise_count = label_counts.get(-1, 0)
         noise_pct = (noise_count / n_nodes) * 100
-        print(f"| {'Noise (Unclustered)':<20} | {noise_count:>10} | {noise_pct:>9.2f}% |")
+        noise_name_padded = get_colored_cluster_name(-1, f"{'Noise (Unclustered)':<20}", color_map)
+        print(f"| {noise_name_padded} | {noise_count:>10} | {noise_pct:>9.2f}% |")
         
-        sorted_clusters = sorted([k for k in label_counts.keys() if k != -1])
         for cid in sorted_clusters:
             c_count = label_counts[cid]
             c_pct = (c_count / n_nodes) * 100
-            print(f"| {f'Cluster {cid}':<20} | {c_count:>10} | {c_pct:>9.2f}% |")
+            c_name_padded = get_colored_cluster_name(cid, f"{f'Cluster {cid}':<20}", color_map)
+            print(f"| {c_name_padded} | {c_count:>10} | {c_pct:>9.2f}% |")
         print(f"{'='*52}\n")
         
         msg = f"Listed {len(sorted_clusters)} clusters in console."
@@ -271,13 +317,21 @@ def run(viewer, args):
     viewer.last_cluster_params = (f"{mode.upper()}_{param1}", min_sz)
     
     # Apply Colors
-    cmap = plt.get_cmap('tab20')
+    unique_clusters = sorted([k for k in np.unique(labels) if k != -1])
+    n_clusters = len(unique_clusters)
+    if n_clusters > 0:
+        combined_colors = get_combined_colors(n_clusters)
+        color_map = {cid: combined_colors[idx % len(combined_colors)] for idx, cid in enumerate(unique_clusters)}
+    else:
+        color_map = {}
+
     for i in range(n_nodes):
         lbl = labels[i]
         if lbl == -1: 
             viewer.current_colors[i] = (0.8, 0.8, 0.8, 0.4) # Grey for noise
         else: 
-            viewer.current_colors[i] = cmap(lbl % 20)
+            r, g, b = color_map[lbl]
+            viewer.current_colors[i] = (r, g, b, 1.0)
         
     viewer.update_nodes()
     
@@ -293,13 +347,15 @@ def run(viewer, args):
     
     noise_count = label_counts.get(-1, 0)
     noise_pct = (noise_count / n_nodes) * 100
-    print(f"| {'Noise (Unclustered)':<20} | {noise_count:>10} | {noise_pct:>9.2f}% |")
+    noise_name_padded = get_colored_cluster_name(-1, f"{'Noise (Unclustered)':<20}", color_map)
+    print(f"| {noise_name_padded} | {noise_count:>10} | {noise_pct:>9.2f}% |")
     
     sorted_clusters = sorted([k for k in label_counts.keys() if k != -1])
     for cid in sorted_clusters:
         c_count = label_counts[cid]
         c_pct = (c_count / n_nodes) * 100
-        print(f"| {f'Cluster {cid}':<20} | {c_count:>10} | {c_pct:>9.2f}% |")
+        c_name_padded = get_colored_cluster_name(cid, f"{f'Cluster {cid}':<20}", color_map)
+        print(f"| {c_name_padded} | {c_count:>10} | {c_pct:>9.2f}% |")
     print(f"{'='*52}\n")
     
     n_clusters = len(sorted_clusters)

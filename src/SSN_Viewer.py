@@ -574,7 +574,28 @@ class MainViewer:
                         self.n_nodes = len(self.full_headers)
                         
                         if "colors" in hf: self.current_colors = hf["colors"][:]
-                        if "sizes" in hf: self.current_sizes = hf["sizes"][:]
+                        if "sizes" in hf:
+                            self.current_sizes = hf["sizes"][:].astype(np.float32)
+                            # Sync/Rescale cached sizes with current cfg.NODE_SIZE
+                            old_base = hf.attrs.get("base_node_size", None)
+                            if old_base is not None:
+                                try:
+                                    old_base = float(old_base)
+                                    new_base = float(cfg.NODE_SIZE)
+                                    if old_base > 0 and old_base != new_base:
+                                        self.current_sizes = self.current_sizes * (new_base / old_base)
+                                except Exception as e:
+                                    print(f"Warning: Failed to rescale cached node sizes: {e}")
+                            else:
+                                # Backward compatibility: if all sizes are uniform, overwrite with current cfg.NODE_SIZE
+                                if len(self.current_sizes) > 0:
+                                    first_val = self.current_sizes[0]
+                                    if np.allclose(self.current_sizes, first_val):
+                                        self.current_sizes.fill(cfg.NODE_SIZE)
+                                    else:
+                                        # Rescale assuming old base was 10.0
+                                        new_base = float(cfg.NODE_SIZE)
+                                        self.current_sizes = self.current_sizes * (new_base / 10.0)
                         if "shapes" in hf:
                             raw_shapes = hf["shapes"][:]
                             self.current_shapes = np.array([s.decode('utf-8') if isinstance(s, bytes) else s for s in raw_shapes], dtype=object)
@@ -732,6 +753,7 @@ class MainViewer:
                     'PERCENTAGE_DROP_THRESHOLD': getattr(cfg, 'PERCENTAGE_DROP_THRESHOLD', 0.0),
                     'PACKING_GRID_SIZE': getattr(cfg, 'PACKING_GRID_SIZE', 200.0),
                     'PACKING_PADDING': getattr(cfg, 'PACKING_PADDING', 50.0),
+                    'PACKING_GEOMETRY': getattr(cfg, 'PACKING_GEOMETRY', 'Square'),
                     'COULOMB_CUTOFF': getattr(cfg, 'COULOMB_CUTOFF', 15.0),
                     'COULOMB_K': getattr(cfg, 'COULOMB_K', 50.0),
                     'MAX_FORCE_LIMIT': getattr(cfg, 'MAX_FORCE_LIMIT', 10.0),
@@ -776,7 +798,7 @@ class MainViewer:
         
         # Only initialize if they weren't loaded from the cache
         if not hasattr(self, 'current_colors'):
-            n_rgba = mcolors.to_rgba(cfg.NEIGHBOR_COLOR)
+            n_rgba = mcolors.to_rgba(cfg.INITIAL_NODE_COLOR)
             self.current_colors = np.tile(n_rgba, (self.n_nodes, 1)).astype(np.float32)
         if not hasattr(self, 'current_sizes'): self.current_sizes = np.full(self.n_nodes, cfg.NODE_SIZE, dtype=np.float32)
         if not hasattr(self, 'current_shapes'): self.current_shapes = np.full(self.n_nodes, 'disc', dtype=object)

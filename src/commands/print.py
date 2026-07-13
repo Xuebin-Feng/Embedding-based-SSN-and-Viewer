@@ -447,6 +447,17 @@ def run(viewer, args):
         viewer.console_text.text = f"Saved {ext.upper()}: {filename}"
         if hasattr(viewer, 'console_bg'): viewer.console_bg.visible = True
         
+        # Open the save folder in the system file explorer
+        try:
+            abs_dir = os.path.abspath(save_dir)
+            if os.name == 'nt':
+                os.startfile(abs_dir)
+            else:
+                import subprocess
+                subprocess.Popen(['xdg-open', abs_dir])
+        except Exception:
+            pass  # Non-critical, don't block on failure
+        
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -457,6 +468,7 @@ def run(viewer, args):
              
     finally:
         # --- RESTORE STATE ---
+        
         viewer.view.camera.aspect = orig_aspect
         viewer.view.camera.rect = orig_rect
         

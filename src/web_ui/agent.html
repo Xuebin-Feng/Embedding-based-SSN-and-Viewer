@@ -504,19 +504,31 @@
 
         /* ── Chat input bar ──────────────────────────────── */
         .chat-input-bar {
-            display: flex; gap: 8px; height: 40px; flex-shrink: 0;
+            display: flex; gap: 8px; min-height: 40px; height: auto; flex-shrink: 0; align-items: flex-end;
         }
 
         #chat-input-field {
-            flex: 1; padding: 0 14px;
+            flex: 1; padding: 10px 14px;
             border: 1px solid var(--border-color);
             border-radius: 8px; font-size: 13.5px; outline: none;
             background: var(--input-bg); color: var(--input-text);
-            box-shadow: var(--shadow); transition: all 0.15s;
+            box-shadow: var(--shadow); transition: border-color 0.15s, box-shadow 0.15s;
             font-family: var(--font-family);
+            resize: none;
+            height: 40px;
+            max-height: 200px;
+            line-height: 1.4;
+            overflow-y: auto;
         }
         #chat-input-field:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
         #chat-input-field:disabled { background: var(--badge-bg); color: var(--text-secondary); cursor: not-allowed; }
+
+        #chat-send-btn {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
 
         /* ═══════════════════════════════════════════════════
            RIGHT PANEL — Model Cards Manager
@@ -713,7 +725,7 @@
             </div>
             <div id="chat-log"></div>
             <div class="chat-input-bar">
-                <input type="text" id="chat-input-field" placeholder="Ask the agent a question or give a command..." disabled>
+                <textarea id="chat-input-field" placeholder="Ask the agent a question or give a command..." disabled></textarea>
                 <button class="btn btn-primary" id="chat-send-btn" disabled>Send</button>
             </div>
         </div>
@@ -1089,7 +1101,19 @@
             const toggleInput = document.getElementById("agent-toggle-input");
 
             sendBtn.addEventListener("click", sendAgentQuery);
-            inputField.addEventListener("keydown", (e) => { if (e.key === "Enter") sendAgentQuery(); });
+            inputField.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendAgentQuery();
+                }
+            });
+            inputField.addEventListener("input", () => {
+                inputField.style.height = "40px";
+                const scrollHeight = inputField.scrollHeight;
+                if (scrollHeight > 40) {
+                    inputField.style.height = (scrollHeight + 2) + "px";
+                }
+            });
 
             clearBtn.addEventListener("click", () => {
                 sendAction({ action: "clear_history" });
@@ -1233,6 +1257,7 @@
             if (!query) return;
             appendUserMsg(query);
             inputField.value = "";
+            inputField.style.height = "40px";
             enableInput(false);
             sendAction({ action: "agent_query", query: query });
         }
@@ -1242,10 +1267,19 @@
             const b = document.getElementById("chat-send-btn");
             f.disabled = !enabled;
             b.disabled = !enabled;
-            if (enabled) f.focus();
+            if (enabled) {
+                f.focus();
+                f.style.height = "40px";
+            }
         }
 
         function setAgentThinking(modelName) {
+            const existing = document.getElementById("thinking-bubble");
+            if (existing) {
+                const inner = existing.querySelector(".msg-system");
+                if (inner) inner.innerHTML = `⏳ Thinking (${escapeHtml(modelName)})...`;
+                return;
+            }
             const chatLog = document.getElementById("chat-log");
             const wrapper = document.createElement("div");
             wrapper.className = "msg-wrapper msg-wrapper-system";
@@ -1355,7 +1389,11 @@
             if (tokens && tokens.total) {
                 const ti = document.createElement("div");
                 ti.className = "token-info";
-                ti.textContent = `Tokens: ${tokens.total} (${tokens.prompt} prompt, ${tokens.completion} completion)`;
+                let text = `Tokens: ${tokens.total} (${tokens.prompt} prompt, ${tokens.completion} completion)`;
+                if (tokens.requests) {
+                    text += ` | Requests: ${tokens.requests}`;
+                }
+                ti.textContent = text;
                 wrapper.appendChild(ti);
             }
 

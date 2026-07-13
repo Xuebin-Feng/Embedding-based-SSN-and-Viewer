@@ -3,6 +3,41 @@ import numpy as np
 import re
 import os
 import SSN_Utils as utils
+import sys
+import colorsys
+import math
+
+if sys.platform == 'win32':
+    os.system('')
+
+def get_colored_subcluster_name(sub_id, name_str, color_map=None):
+    if sub_id == -1:
+        # Grey for noise
+        r, g, b = 204, 204, 204
+    elif color_map and sub_id in color_map:
+        rgba = color_map[sub_id]
+        r, g, b = int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)
+    else:
+        r, g, b = 180, 180, 180
+    return f"\033[38;2;{r};{g};{b}m{name_str}\033[0m"
+
+def get_subcluster_colors(n_subclusters):
+    if n_subclusters <= 0:
+        return []
+    shades_per_hue = math.ceil(n_subclusters / 12)
+    n_hues = math.ceil(n_subclusters / shades_per_hue)
+    colors = []
+    for s_idx in range(shades_per_hue):
+        for h_idx in range(n_hues):
+            hue = h_idx / n_hues
+            if shades_per_hue == 1:
+                lightness = 0.50  # Strong/bold tone
+            else:
+                lightness = 0.35 + (s_idx / (shades_per_hue - 1)) * 0.30  # Bold tones (0.35 to 0.65)
+            saturation = 0.95  # Highly saturated
+            rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+            colors.append(rgb)
+    return colors
 
 def print_help():
     print("""
@@ -306,16 +341,25 @@ def run(viewer, args):
     
     noise_count = np.sum(local_labels == -1)
     noise_pct = (noise_count / n_sub) * 100
-    print(f"| {'Noise (Unclustered)':<20} | {noise_count:>10} | {noise_pct:>9.2f}% |")
     
     sorted_subs = sorted(sub_counts.keys())
+    n_subclusters = len(sorted_subs)
+    if n_subclusters > 0:
+        sub_colors = get_subcluster_colors(n_subclusters)
+        color_map = {sid: sub_colors[idx % len(sub_colors)] for idx, sid in enumerate(sorted_subs)}
+    else:
+        color_map = {}
+        
+    noise_name_padded = get_colored_subcluster_name(-1, f"{'Noise (Unclustered)':<20}", color_map)
+    print(f"| {noise_name_padded} | {noise_count:>10} | {noise_pct:>9.2f}% |")
+    
     for m in sorted_subs:
         count = sub_counts[m]
         pct = (count / n_sub) * 100
-        print(f"| {f'subcluster_{cluster_id}_{m}':<20} | {count:>10} | {pct:>9.2f}% |")
+        sub_name_padded = get_colored_subcluster_name(m, f"{f'subcluster_{cluster_id}_{m}':<20}", color_map)
+        print(f"| {sub_name_padded} | {count:>10} | {pct:>9.2f}% |")
     print(f"{'='*52}\n")
 
-    n_subclusters = len(sorted_subs)
     msg = f"Done! Found {n_subclusters} subclusters in cluster_{cluster_id} via {mode.upper()}."
     if hasattr(viewer, 'console_text'):
         viewer.console_text.text = msg

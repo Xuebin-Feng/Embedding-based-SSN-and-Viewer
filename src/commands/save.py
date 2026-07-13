@@ -44,7 +44,9 @@ def run(viewer, args):
             hf.create_dataset("positions", data=viewer.pos, compression="gzip")
             
             if hasattr(viewer, 'current_colors'): hf.create_dataset("colors", data=viewer.current_colors, compression="gzip")
-            if hasattr(viewer, 'current_sizes'): hf.create_dataset("sizes", data=viewer.current_sizes, compression="gzip")
+            if hasattr(viewer, 'current_sizes'): 
+                hf.create_dataset("sizes", data=viewer.current_sizes, compression="gzip")
+                hf.attrs["base_node_size"] = cfg.NODE_SIZE
             if hasattr(viewer, 'current_shapes'): hf.create_dataset("shapes", data=np.array(viewer.current_shapes, dtype=object), dtype=dt_str, compression="gzip")
             if hasattr(viewer, 'visible_mask'): hf.create_dataset("visible_mask", data=viewer.visible_mask, compression="gzip")
             if getattr(viewer, 'cluster_labels', None) is not None: hf.create_dataset("cluster_labels", data=viewer.cluster_labels, compression="gzip")

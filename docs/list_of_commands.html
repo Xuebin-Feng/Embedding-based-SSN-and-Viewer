@@ -1048,7 +1048,7 @@
                     <div class="syntax-content">cluster [mode] [parameter] [min_size]</div>
                     <button class="copy-btn" onclick="copyText('cluster', this)">Copy</button>
                 </div>
-                <p><strong>Overview:</strong> The cluster command partitions the currently loaded sequence similarity network into distinct functional communities. It applies color-coded labels to the nodes and records these boundaries for downstream tools (such as sub-alignment and group extraction).</p>
+                <p><strong>Overview:</strong> The cluster command partitions the currently loaded sequence similarity network into distinct functional communities. It applies visually distinct color-coded labels generated dynamically using a custom HLS color generator that mimics the pastel look of <code>tab20c</code>, automatically scaling the number of distinct hues and lightness levels based on the number of clusters to color, and records these boundaries for downstream tools (such as sub-alignment and group extraction).</p>
                 
                 <div class="subheading">Arguments</div>
                 <ul>
@@ -1095,6 +1095,7 @@
                 <ul>
                     <li>Clustering is a destructive action to the visual state (overwrites node colors), but can be reverted with the <code>undo</code> command.</li>
                     <li>Clustering parameters are cached. Downstream sequence alignment tools automatically construct output directories named after your specific parameters (e.g., <code>LEIDEN_1.0_Min10</code>).</li>
+                    <li>The command uses a dynamic color generator operating in HLS color space. It automatically scales the balance of distinct hues and lightness shades based on the number of clusters, ensuring maximum readability, visual distinction, and a clean pastel layout without requiring external dependencies.</li>
                 </ul>
             </section>
 
@@ -1112,7 +1113,7 @@
                     <div class="syntax-content">subcluster &lt;cluster_name&gt; [mode] [param_1] [min_size]  |  subcluster clear</div>
                     <button class="copy-btn" onclick="copyText('subcluster', this)">Copy</button>
                 </div>
-                <p><strong>Overview:</strong> Performs subclustering on a specific topology cluster, creating custom group labels named <code>subcluster_N_M</code> (where N is the original cluster ID, and M is the subcluster ID). Unlike main clusters, these are saved as custom group labels so nodes can keep their original cluster identities.</p>
+                <p><strong>Overview:</strong> Performs subclustering on a specific topology cluster, creating custom group labels named <code>subcluster_N_M</code> (where N is the original cluster ID, and M is the subcluster ID). Unlike main clusters, these are saved as custom group labels so nodes can keep their original cluster identities. The terminal output report is color-coded using a dynamic, highly saturated color scheme to clearly distinguish subclusters from main clusters.</p>
                 
                 <div class="subheading">Arguments</div>
                 <ul>
@@ -1133,6 +1134,12 @@
                     <li class="example-item"><span>subcluster cluster_2 mcl 2.0 5</span><button class="copy-btn" onclick="copyText('subcluster cluster_2 mcl 2.0 5', this)">Copy</button></li>
                     <li class="example-item"><span>subcluster cluster_5 leiden 1.5</span><button class="copy-btn" onclick="copyText('subcluster cluster_5 leiden 1.5', this)">Copy</button></li>
                     <li class="example-item"><span>subcluster clear</span><button class="copy-btn" onclick="copyText('subcluster clear', this)">Copy</button></li>
+                </ul>
+
+                <div class="subheading">Important Notes</div>
+                <ul>
+                    <li>Subclustering does not modify the visual colors of the nodes in the viewer, allowing nodes to preserve their main cluster identity.</li>
+                    <li>The terminal statistics report is color-coded using a rich, highly saturated HLS scheme (saturation 0.95, lightness 0.35 - 0.65) to differentiate subclusters from the pastel colors used for main clusters.</li>
                 </ul>
             </section>
 

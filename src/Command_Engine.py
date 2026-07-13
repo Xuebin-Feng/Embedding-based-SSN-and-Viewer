@@ -367,7 +367,7 @@ def execute_reset(viewer, targets):
         if base_p == "color":
             if hasattr(viewer, 'current_colors'):
                 import matplotlib.colors as mcolors
-                n_rgba = mcolors.to_rgba(cfg.NEIGHBOR_COLOR)
+                n_rgba = mcolors.to_rgba(cfg.INITIAL_NODE_COLOR)
                 viewer.current_colors[:] = n_rgba
             needs_update = True
             targets_found.append("colors")

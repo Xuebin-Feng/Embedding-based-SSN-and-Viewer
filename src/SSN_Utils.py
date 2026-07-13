@@ -506,9 +506,7 @@ def build_network_from_raw(data, forced_ref_header=None):
     # ---> NEW: Export the scores so the Viewer can use them for annealing <---
     edge_scores = valid_scores[thresh_mask] 
 
-    # Only show the histogram if the user has opted in via the GUI
-    if getattr(cfg, 'SHOW_HISTOGRAM', False):
-        plot_score_histogram(scores_for_hist, cfg.SIMILARITY_THRESHOLD)
+
     
     n_nodes_new = len(new_headers)
     

@@ -49,7 +49,7 @@ EDGE_ALPHA = 0.1
 NODE_BOUNDARY_WIDTH = 0.5
 TEXT_SIZE = 8
 TEXT_COLOR = 'grey'
-NEIGHBOR_COLOR = '#4488ff'
+INITIAL_NODE_COLOR = '#4488ff'
 HOVER_COLOR = '#ffaa00'
 CONNECTED_NODE_COLOR = '#ff0000'
 EDGE_COLOR = '#000000'
@@ -75,7 +75,7 @@ RMSD_THRESHOLD = 0.005
 PERCENTAGE_DROP_THRESHOLD = 0.1    
 RMSD_WINDOW = 50
 ENABLE_PROGRESSIVE_SIMULATION = False
-SHOW_HISTOGRAM = False
+PACKING_GEOMETRY = "Square"
 
 # --- Monte Carlo / SGLD Settings ---
 SGLD_MIN_K = 20
@@ -92,7 +92,13 @@ if os.path.exists(SETTINGS_FILE):
     try:
         with open(SETTINGS_FILE, "r") as f:
             viewer_settings = json.load(f)
+            # Map legacy settings keys to new keys
+            LEGACY_KEYS_MAPPING = {
+                "NEIGHBOR_COLOR": "INITIAL_NODE_COLOR"
+            }
             for k, v in viewer_settings.items():
+                if k in LEGACY_KEYS_MAPPING:
+                    k = LEGACY_KEYS_MAPPING[k]
                 if k in globals() and v is not None and str(v).strip() != "":
                     orig = globals()[k]
                     if isinstance(orig, int) and not isinstance(orig, bool):
@@ -196,7 +202,7 @@ if __name__ == "__main__":
             if event.button() == Qt.MouseButton.LeftButton:
                 opt = QStyleOptionSlider()
                 self.initStyleOption(opt)
-                sr = self.style().subControlRect(QStyle.SubControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, self)
+                sr = self.style().subControlRect(QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, self)
                 if not sr.contains(event.position().toPoint()):
                     val = self.style().sliderValueFromPosition(self.minimum(), self.maximum(), int(event.position().x()), self.width())
                     self.setValue(val)
@@ -436,7 +442,7 @@ if __name__ == "__main__":
                 "EDGE_ALPHA": "Visual parameter controlling the transparency of the network edge lines, ranging from 0.0 (fully transparent) to 1.0 (opaque).\nLower opacity helps reveal the underlying node distribution and cluster density in highly connected graphs.",
                 "TEXT_SIZE": "Font size used for rendering text labels on clusters or individual nodes in the visualizer window.\nAdjust this to make labels legible against the background without overlapping or obstructing structural features of the network.",
                 "TEXT_COLOR": "Color of standard text labels in the viewer. Can be specified as a standard web color name (e.g. 'grey', 'black') or hex code.\nChoose a color that contrasts well with your background to ensure readability of cluster annotations.",
-                "NEIGHBOR_COLOR": "Highlight color used to render neighbor nodes and their edges when inspecting a selected node in the network.\nThis distinct highlight color makes it easy to visually trace the first-degree connectivity of individual sequences.",
+                "INITIAL_NODE_COLOR": "The default fill color applied to all nodes when the network is first loaded. This serves as the baseline node color before any custom coloring is applied.",
                 "HOVER_COLOR": "Highlight color applied to a node and its adjacent connections when hovering over it with the cursor, or when selected.\nThis color should be highly vibrant to give immediate interactive visual feedback to the user.",
                 "CONNECTED_NODE_COLOR": "Highlight color applied to the outer contour/border of nodes that are directly connected to the currently selected node.\nAllows easy visual identification of the local neighborhood network topology surrounding any selected node.",
                 "EDGE_COLOR": "Color of the standard connection lines (edges) drawn between similar nodes in the network plot.\nCan be specified as a standard color name or hex code; lighter colors are often preferred to reduce visual dominance of edges.",
@@ -453,7 +459,8 @@ if __name__ == "__main__":
                 "PERCENTAGE_DROP_THRESHOLD": "Early termination criteria based on the percentage change of the moving average RMSD over the window size.\nIf the rate of layout change drops below this percentage (representing a plateau), the simulation terminates. Set to 0 to disable.",
                 "RMSD_WINDOW": "The number of simulation steps over which the moving average RMSD is calculated for plateau and convergence detection.\nLarger windows smooth out transient spikes in node velocities, ensuring that early termination is only triggered on true convergence.",
                 "ENABLE_PROGRESSIVE_SIMULATION": "Gradually lowers the similarity threshold in stages for massive connected components to prevent massive grid-lock.\nHelps resolve fine-grained sub-clusters in large, dense components. Disable if layout fails to converge.",
-                "SHOW_HISTOGRAM": "Displays an interactive popup window showing the histogram distribution of all edge weights/similarity scores in the network.\nPauses visualization building until closed, allowing the user to make informed choices on similarity thresholds.",
+                "PACKING_GEOMETRY": "Sets the boundary geometry for cluster layout packing. Options include Square and Circle.",
+                "PACKING_GRID_SIZE": "The base size of one grid square in the macro-grid layout packing.\nControls spacing and size scaling of packed independent components in the final network visualization.",
                 "SGLD_MIN_K": "Minimum number of nearest neighbors (K) to retain for each node during Monte Carlo / SGLD physics simulation.\nPrevents nodes in small or disconnected clusters from collapsing onto each other by maintaining a baseline neighborhood.",
                 "SGLD_K_PERCENT": "Fraction of total nodes used to compute the dynamic neighborhood size (K) for each node in Monte Carlo mode.\nSpecifically, K is set to max(SGLD_MIN_K, Fraction * total_nodes). Higher fractions preserve global structure but increase memory usage.",
                 "SGLD_START_TEMP": "Starting temperature for the Simulated Annealing schedule in Monte Carlo / SGLD mode.\nControls the initial stochastic thermal noise; higher temperatures allow nodes to escape local energy minima and resolve gridlocks.",
@@ -639,32 +646,46 @@ if __name__ == "__main__":
             self.check_umap.setChecked(bool(umap_mode_val))
             switch_umap_style(bool(umap_mode_val))
             
+            from PyQt6.QtWidgets import QSizePolicy
+            lbl_k = QLabel("   UMAP Nearest Neighbors (k):")
+            lbl_md = QLabel("   UMAP Minimum Distance:")
+            
             self.spin_umap_k = NoScrollSpinBox()
             self.spin_umap_k.setRange(2, 500)
             self.spin_umap_k.setValue(int(globals().get("UMAP_NEIGHBORS") or 15))
+            self.spin_umap_k.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             
             self.spin_umap_md = NoScrollDoubleSpinBox()
             self.spin_umap_md.setRange(0.0, 1.0)
             self.spin_umap_md.setSingleStep(0.1)
             self.spin_umap_md.setDecimals(2)
             self.spin_umap_md.setValue(float(globals().get("UMAP_MIN_DIST") or 0.1))
+            self.spin_umap_md.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             
-            self.spin_umap_k.setEnabled(self.check_umap.isChecked())
-            self.spin_umap_md.setEnabled(self.check_umap.isChecked())
+            # Apply styling for disabled states (grayed out)
+            disabled_spinbox_style = "QSpinBox:disabled, QDoubleSpinBox:disabled { background-color: #f0f0f0; color: #888; }"
+            disabled_label_style = "QLabel:disabled { color: #888; }"
+            self.spin_umap_k.setStyleSheet(disabled_spinbox_style)
+            self.spin_umap_md.setStyleSheet(disabled_spinbox_style)
+            lbl_k.setStyleSheet(disabled_label_style)
+            lbl_md.setStyleSheet(disabled_label_style)
+            
+            # Set initial enabled/disabled states based on current toggle value
+            umap_enabled = self.check_umap.isChecked()
+            self.spin_umap_k.setEnabled(umap_enabled)
+            self.spin_umap_md.setEnabled(umap_enabled)
+            lbl_k.setEnabled(umap_enabled)
+            lbl_md.setEnabled(umap_enabled)
             
             def toggle_umap(state):
                 self.spin_umap_k.setEnabled(state)
                 self.spin_umap_md.setEnabled(state)
+                lbl_k.setEnabled(state)
+                lbl_md.setEnabled(state)
                 self.update_live_validators()
                 
             self.check_umap.toggled.connect(toggle_umap)
             self.spin_umap_k.valueChanged.connect(self.update_live_validators)
-            
-            from PyQt6.QtWidgets import QSizePolicy
-            lbl_k = QLabel("   UMAP Nearest Neighbors (k):")
-            lbl_md = QLabel("   UMAP Minimum Distance:")
-            self.spin_umap_k.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            self.spin_umap_md.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             
             umap_layout.addWidget(self.check_umap)
             umap_layout.addWidget(lbl_k)
@@ -712,10 +733,22 @@ if __name__ == "__main__":
             self.line_min_occ = QLineEdit("" if min_occ_val in [None, "None"] else str(min_occ_val))
             add_row("FILTER_MIN_OCCUPANCY", "Filter Min Occupancy %:", self.line_min_occ)
             
+            # Horizontal layout for both statistics and histogram buttons
+            btn_container = QWidget()
+            btn_lay = QHBoxLayout(btn_container)
+            btn_lay.setContentsMargins(0, 0, 0, 0)
+            
             self.btn_stats = QPushButton("Compute Network Statistics")
             self.btn_stats.setStyleSheet("background-color: #2196F3; color: white;")
             self.btn_stats.clicked.connect(self.run_statistics)
-            layout.addRow("", self.btn_stats)
+            
+            self.btn_hist = QPushButton("Histogram")
+            self.btn_hist.setStyleSheet("background-color: #9C27B0; color: white;")
+            self.btn_hist.clicked.connect(self.run_histogram)
+            
+            btn_lay.addWidget(self.btn_stats, 3)
+            btn_lay.addWidget(self.btn_hist, 1)
+            layout.addRow("", btn_container)
             
             # --- Target Cache Tracker & Folder Button ---
             cache_container = QWidget()
@@ -818,6 +851,8 @@ if __name__ == "__main__":
             has_fasta = bool(self.cb_fasta.currentText().strip())
             has_hdf5 = bool(self.cb_hdf5.currentText().strip())
             self.btn_stats.setEnabled(has_fasta and has_hdf5)
+            if hasattr(self, 'btn_hist'):
+                self.btn_hist.setEnabled(has_fasta and has_hdf5)
             
             is_umap = hasattr(self, 'check_umap') and self.check_umap.isChecked()
             
@@ -1130,6 +1165,142 @@ if __name__ == "__main__":
             except Exception as e:
                 self.stat_display.setText(f"Error during computation:\n{e}")
 
+        def run_histogram(self):
+            import h5py
+            import numpy as np
+            import math
+            
+            fasta_path = os.path.join(self.inputs["FASTA_DIR"].text(), self.cb_fasta.currentText())
+            hdf5_path = os.path.join(self.inputs["HDF5_DIR"].text(), self.cb_hdf5.currentText())
+            
+            self.stat_display.setText("Computing score distribution... This may take a moment.")
+            QApplication.processEvents()
+            
+            try:
+                is_blast = "EValue" in os.path.basename(hdf5_path) or "Evalue" in os.path.basename(hdf5_path)
+                score_mode = self.cb_score_mode.currentText()
+                norm_mode = self.cb_norm_mode.currentText()
+                
+                with h5py.File(hdf5_path, "r") as hf:
+                    from Bio import SeqIO
+                    kept_mask = None
+                    if fasta_path and os.path.exists(fasta_path):
+                        fasta_ids = set()
+                        fasta_headers = set()
+                        for rec in SeqIO.parse(fasta_path, "fasta"):
+                            fasta_ids.add(rec.id)
+                            fasta_headers.add(rec.description)
+                            
+                        raw_headers = hf['headers'][:]
+                        headers = [h.decode('utf-8') if isinstance(h, bytes) else h for h in raw_headers]
+                        
+                        net_headers_set = set(headers)
+                        net_id_set = {h.split()[0] for h in headers}
+                        missing_nodes = [hid for hid in fasta_ids if hid not in net_id_set and hid not in net_headers_set]
+                        if missing_nodes:
+                            raise ValueError(f"FASTA file is NOT a strict subset of the network file. {len(missing_nodes)} sequences are missing from the network.")
+                        
+                        valid_indices = []
+                        for i, h in enumerate(headers):
+                            rec_id = h.split()[0]
+                            if h in fasta_headers or rec_id in fasta_ids:
+                                valid_indices.append(i)
+                                
+                        if len(valid_indices) < len(headers):
+                            kept_mask = np.zeros(len(headers), dtype=bool)
+                            kept_mask[valid_indices] = True
+                    
+                    if is_blast:
+                        raw_scores = hf['score'][:]
+                        sources = hf['i'][:]
+                        targets = hf['j'][:]
+                    else:
+                        sources = hf['i'][:].astype(np.int64)
+                        targets = hf['j'][:].astype(np.int64)
+                        if score_mode == "local":
+                            raw_scores = hf['l_score'][:].astype(np.float32)
+                            align_lens = hf['l_len'][:].astype(np.float32)
+                        else:
+                            raw_scores = hf['g_score'][:].astype(np.float32)
+                            align_lens = hf['g_len'][:].astype(np.float32)
+                            
+                        if 'seq_lens' in hf:
+                            seq_lens = hf['seq_lens'][:]
+                        else:
+                            seq_lens = np.ones(np.max([np.max(sources), np.max(targets)]) + 1)
+                        
+                    if kept_mask is not None:
+                        valid_edges_mask = kept_mask[sources] & kept_mask[targets]
+                        raw_scores = raw_scores[valid_edges_mask]
+                        sources = sources[valid_edges_mask]
+                        targets = targets[valid_edges_mask]
+                        if not is_blast:
+                            align_lens = align_lens[valid_edges_mask]
+                            
+                    if is_blast:
+                        scores = raw_scores.astype(np.float32)
+                    else:
+                        epsilon = 1e-6
+                        if norm_mode == "alignment_length":
+                            denom = align_lens
+                        else:
+                            len_src = seq_lens[sources].astype(np.float32)
+                            len_dst = seq_lens[targets].astype(np.float32)
+                            if norm_mode == "shorter_sequence": denom = np.minimum(len_src, len_dst)
+                            elif norm_mode == "longer_sequence": denom = np.maximum(len_src, len_dst)
+                            elif norm_mode == "average_sequence": denom = (len_src + len_dst) / 2.0
+                            else: denom = align_lens
+                            
+                        denom = np.maximum(denom, epsilon)
+                        scores = (raw_scores / denom).astype(np.float32)
+                
+                if len(scores) == 0:
+                    self.stat_display.setText("Warning: No valid edges found in the selected Fasta subset.")
+                    return
+                
+                # Determine threshold based on top edge % override
+                is_umap = hasattr(self, 'check_umap') and self.check_umap.isChecked()
+                top_percent_str = self.line_top.text().strip()
+                try:
+                    top_percent = float(top_percent_str) if top_percent_str else None
+                except ValueError:
+                    top_percent = None
+                    
+                if top_percent is not None and not is_umap:
+                    total_active_nodes = np.sum(kept_mask) if kept_mask is not None else len(headers)
+                    theoretical_max_edges = (total_active_nodes * (total_active_nodes - 1)) / 2.0
+                    k = int(theoretical_max_edges * (top_percent / 100.0))
+                    if len(scores) == 0:
+                        threshold = 0.0
+                    else:
+                        k = max(1, min(k, len(scores)))
+                        sorted_all = np.sort(scores)[::-1]
+                        threshold = sorted_all[k - 1]
+                else:
+                    thresh_str = self.line_thresh.text().strip()
+                    try:
+                        threshold = float(thresh_str) if thresh_str else 0.0
+                    except ValueError:
+                        threshold = 0.0
+                
+                self.stat_display.setText("Displaying score histogram...")
+                QApplication.processEvents()
+                
+                # Call the utility function to show the histogram
+                from SSN_Utils import plot_score_histogram
+                
+                # Make sure to mock/set up the cfg configuration just in case it is read inside the function
+                import SSN_Config as cfg_mod
+                cfg_mod.INPUT_IS_EVALUE = is_blast
+                cfg_mod.NORM_MODE = norm_mode
+                
+                plot_score_histogram(scores, threshold)
+                
+                self.stat_display.setText("Histogram displayed successfully.")
+                
+            except Exception as e:
+                self.stat_display.setText(f"Error during histogram generation:\n{e}")
+
         def create_visuals_tab(self):
             tab = QWidget()
             main_layout = QVBoxLayout(tab)
@@ -1205,10 +1376,10 @@ if __name__ == "__main__":
                 self.inputs[key] = box
             
             # 2. Colors Setup
-            color_keys = ["TEXT_COLOR", "NEIGHBOR_COLOR", "HOVER_COLOR", "CONNECTED_NODE_COLOR", "EDGE_COLOR", "NODE_BOUNDARY_COLOR"]
+            color_keys = ["TEXT_COLOR", "INITIAL_NODE_COLOR", "HOVER_COLOR", "CONNECTED_NODE_COLOR", "EDGE_COLOR", "NODE_BOUNDARY_COLOR"]
             self.visual_defaults = {
                 "NODE_SIZE": 10, "EDGE_WIDTH": 1.0, "NODE_BOUNDARY_WIDTH": 0.5, "EDGE_ALPHA": 0.1, "TEXT_SIZE": 8,
-                "TEXT_COLOR": "grey", "NEIGHBOR_COLOR": "#4488ff", "HOVER_COLOR": "#ffaa00", "CONNECTED_NODE_COLOR": "#ff0000",
+                "TEXT_COLOR": "grey", "INITIAL_NODE_COLOR": "#4488ff", "HOVER_COLOR": "#ffaa00", "CONNECTED_NODE_COLOR": "#ff0000",
                 "EDGE_COLOR": "#000000", "NODE_BOUNDARY_COLOR": "#000000", "LOW_RESOURCE_MODE": False
             }
             
@@ -1318,7 +1489,8 @@ if __name__ == "__main__":
                 "DAMPING": 0.9, "DT": 0.005, "MAX_STEPS": 10000, "RMSD_THRESHOLD": 0.005,
                 "PERCENTAGE_DROP_THRESHOLD": 0.1, "RMSD_WINDOW": 50,
                 "ENABLE_PROGRESSIVE_SIMULATION": False,
-                "SHOW_HISTOGRAM": False,
+                "PACKING_GEOMETRY": "Square",
+                "PACKING_GRID_SIZE": 20.0,
                 "SGLD_MIN_K": 20, "SGLD_K_PERCENT": 0.01,
                 "SGLD_START_TEMP": 1.5, "SGLD_NOISE_SCALE": 1.0
             }
@@ -1539,37 +1711,82 @@ if __name__ == "__main__":
             cb_prog.setChecked(initial_state)
             switch_toggle_style(initial_state)
             
-            # Show Score Histogram
-            hist_container = QWidget()
-            hist_layout = QHBoxLayout(hist_container)
-            hist_layout.setContentsMargins(0, 0, 0, 0)
-            lbl_hist = QLabel("Show Score Histogram:")
-            lbl_hist.setFixedWidth(180)
-            cb_hist = QPushButton()
-            cb_hist.setCheckable(True)
-            cb_hist.setFixedSize(60, 28)
-            hist_layout.addWidget(lbl_hist)
-            hist_layout.addWidget(cb_hist)
-            hist_layout.addStretch()
-            self.inputs["SHOW_HISTOGRAM"] = cb_hist
-            self.labels["SHOW_HISTOGRAM"] = lbl_hist
+            # Packing Geometry Dropdown
+            geom_container = QWidget()
+            geom_layout = QHBoxLayout(geom_container)
+            geom_layout.setContentsMargins(0, 0, 0, 0)
+            lbl_geom = QLabel("Packing Geometry:")
+            lbl_geom.setFixedWidth(180)
+            cb_geom = NoScrollComboBox()
+            cb_geom.addItems(["Square", "Circle"])
             
-            def switch_toggle_style_hist(checked, btn=cb_hist):
-                if checked:
-                    btn.setText("ON")
-                    btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 14px; font-weight: bold; border: 1px solid #388E3C; }")
-                else:
-                    btn.setText("OFF")
-                    btn.setStyleSheet("QPushButton { background-color: #e0e0e0; color: #333; border-radius: 14px; font-weight: bold; border: 1px solid #bdbdbd; }")
+            from PyQt6.QtWidgets import QSizePolicy
+            cb_geom.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             
-            cb_hist.toggled.connect(switch_toggle_style_hist)
-            initial_hist_state = bool(globals().get("SHOW_HISTOGRAM", False))
-            cb_hist.setChecked(initial_hist_state)
-            switch_toggle_style_hist(initial_hist_state)
+            initial_geom = globals().get("PACKING_GEOMETRY", "Square")
+            if initial_geom not in ["Square", "Circle"]:
+                initial_geom = "Square"
+            cb_geom.setCurrentText(initial_geom)
+            
+            geom_layout.addWidget(lbl_geom)
+            geom_layout.addWidget(cb_geom)
+            self.inputs["PACKING_GEOMETRY"] = cb_geom
+            self.labels["PACKING_GEOMETRY"] = lbl_geom
             
             cb_layout.addWidget(pea_container)
-            cb_layout.addWidget(hist_container)
+            cb_layout.addWidget(geom_container)
             form_layout.addRow(cb_row)
+            
+            # Packing Grid Size Slider (Logarithmic Scale)
+            pgs_widget = QWidget()
+            pgs_widget.setObjectName("wrapper")
+            pgs_layout = QHBoxLayout(pgs_widget)
+            pgs_layout.setContentsMargins(0, 0, 0, 0)
+            
+            sl_pgs = NoScrollSlider(Qt.Orientation.Horizontal)
+            sl_pgs.setMinimum(0)
+            sl_pgs.setMaximum(1000)
+            
+            box_pgs = NoScrollDoubleSpinBox()
+            box_pgs.setRange(1.0, 200.0)
+            box_pgs.setDecimals(1)
+            box_pgs.setFixedWidth(70)
+            
+            import math
+            val_pgs = globals().get("PACKING_GRID_SIZE", 20.0)
+            try: val_pgs = float(val_pgs)
+            except: val_pgs = 20.0
+            
+            box_pgs.setValue(val_pgs)
+            pct = math.log(max(1.0, min(val_pgs, 200.0))) / math.log(200.0)
+            sl_pgs.setValue(int(pct * 1000.0))
+            
+            def update_from_slider(x):
+                box_pgs.blockSignals(True)
+                pct_val = x / 1000.0
+                val = math.exp(pct_val * math.log(200.0))
+                box_pgs.setValue(round(val, 1))
+                box_pgs.blockSignals(False)
+                
+            def update_from_box(v):
+                sl_pgs.blockSignals(True)
+                v_clamped = max(1.0, min(v, 200.0))
+                pct_val = math.log(v_clamped) / math.log(200.0)
+                sl_pgs.setValue(int(pct_val * 1000.0))
+                sl_pgs.blockSignals(False)
+                
+            sl_pgs.valueChanged.connect(update_from_slider)
+            box_pgs.valueChanged.connect(update_from_box)
+            
+            pgs_layout.addWidget(sl_pgs)
+            pgs_layout.addWidget(box_pgs)
+            
+            lbl_pgs = QLabel("Packing Grid Size:")
+            lbl_pgs.setFixedWidth(180)
+            
+            form_layout.addRow(lbl_pgs, pgs_widget)
+            self.inputs["PACKING_GRID_SIZE"] = box_pgs
+            self.labels["PACKING_GRID_SIZE"] = lbl_pgs
             
             # --- 7. Combined Minimum K & Percentage K row (Monte Carlo only) ---
             k_row = QWidget()

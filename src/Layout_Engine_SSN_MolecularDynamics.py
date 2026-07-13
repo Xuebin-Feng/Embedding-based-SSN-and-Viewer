@@ -238,7 +238,7 @@ def get_component_labels(n_nodes, edges):
             labels[node] = c_id
     return labels
 
-def pack_components_to_grid(pos, edges, n_nodes, grid_size, padding):
+def pack_components_to_grid(pos, edges, n_nodes, grid_size, padding, packing_geometry="Square"):
     """Packs independent network components into a strict master grid layout."""
     print("Packing independent components using macro-grid boolean packing...")
     components = find_connected_components(n_nodes, edges)
@@ -324,52 +324,97 @@ def pack_components_to_grid(pos, edges, n_nodes, grid_size, padding):
     # --- 2. Sort components: Largest area first, then tie-break by node count ---
     comp_info.sort(key=lambda x: (x['area'], x['num_nodes']), reverse=True)
     
-    # --- 3. Prepare the Master Global Grid ---
+    # --- 3. Prepare the Master Global Grid and Run Spiral Placement ---
     total_area = sum(c['area'] for c in comp_info)
-    max_comp_cols = max(c['cols'] for c in comp_info)
-    target_width_grids = max(int(math.ceil(math.sqrt(total_area) * 1.5)), max_comp_cols)
-    target_height_grids = total_area + max(c['rows'] for c in comp_info) + 10
+    max_cols = max(c['cols'] for c in comp_info)
+    max_rows = max(c['rows'] for c in comp_info)
     
-    grid_map = np.zeros((target_height_grids, target_width_grids), dtype=bool)
+    is_circle = (packing_geometry.lower() == "circle")
+    multiplier = 2.0 if is_circle else 1.5
+    
+    # Start with a grid size S estimated from total area, scaled to prevent border clipping
+    S = max(int(math.ceil(math.sqrt(total_area) * multiplier)), max_cols, max_rows)
+    
     new_pos = np.zeros((n_nodes, 2), dtype=np.float32)
-    
-    # Fill unconnected single nodes just to be safe if any exist
+    # Fill unconnected nodes first
     new_pos[:] = pos[:]
     
-    # --- 4. Pack Components onto Master Grid ---
     # Center nodes aesthetically within their grid squares
     center_x_offset = grid_size / 2.0  
-    center_y_offset = -grid_size / 2.0 
+    center_y_offset = -grid_size / 2.0
     
-    for comp in comp_info:
-        mask = comp['mask']
-        h, w = comp['rows'], comp['cols']
-        placed = False
+    while True:
+        grid_map = np.zeros((S, S), dtype=bool)
+        center_r = S // 2
+        center_c = S // 2
         
-        for r in range(grid_map.shape[0] - h + 1):
-            for c in range(grid_map.shape[1] - w + 1):
+        # Calculate physical center coordinate
+        if is_circle:
+            center_x_phys = center_c + 0.5 * (center_r % 2)
+            center_y_phys = -center_r * (math.sqrt(3.0) / 2.0)
+        else:
+            center_x_phys = center_c
+            center_y_phys = -center_r
+            
+        # Generate all coordinates in the grid map
+        coords = []
+        for r in range(S):
+            for c in range(S):
+                if is_circle:
+                    x_phys = c + 0.5 * (r % 2)
+                    y_phys = -r * (math.sqrt(3.0) / 2.0)
+                    dist = (x_phys - center_x_phys)**2 + (y_phys - center_y_phys)**2
+                else:
+                    dist_l_inf = max(abs(r - center_r), abs(c - center_c))
+                    dist_l_2 = (r - center_r)**2 + (c - center_c)**2
+                    dist = (dist_l_inf, dist_l_2)
+                coords.append((r, c, dist))
                 
-                # Check if the required cells are entirely empty
-                if not np.any(grid_map[r:r+h, c:c+w] & mask):
-                    
-                    # Lock the irregular shape into the global grid map
-                    grid_map[r:r+h, c:c+w] |= mask
-                    
-                    # Convert grid row/col to actual spatial coordinates
+        # Sort coords by distance from center (ascending)
+        coords.sort(key=lambda x: x[2])
+        
+        success = True
+        placed_offsets = []
+        
+        for comp in comp_info:
+            mask = comp['mask']
+            h, w = comp['rows'], comp['cols']
+            placed = False
+            
+            for r_center, c_center, _ in coords:
+                # Target top-left row/col so that component center aligns close to r_center, c_center
+                r = r_center - h // 2
+                c = c_center - w // 2
+                
+                if r >= 0 and r + h <= S and c >= 0 and c + w <= S:
+                    if not np.any(grid_map[r:r+h, c:c+w] & mask):
+                        grid_map[r:r+h, c:c+w] |= mask
+                        placed_offsets.append((r, c))
+                        placed = True
+                        break
+                        
+            if not placed:
+                success = False
+                break
+                
+        if success:
+            # Apply offsets
+            for comp, (r, c) in zip(comp_info, placed_offsets):
+                if is_circle:
+                    # Hexagonal physical coordinates
+                    x_offset = (c + 0.5 * (r % 2)) * grid_size
+                    y_offset = -r * grid_size * (math.sqrt(3.0) / 2.0)
+                else:
+                    # Square grid physical coordinates
                     x_offset = c * grid_size
                     y_offset = -r * grid_size
                     
-                    # Snap component exactly to the master grid coordinates
-                    new_pos[comp['indices'], 0] = comp['shifted_pos'][:, 0] + x_offset + center_x_offset
-                    new_pos[comp['indices'], 1] = comp['shifted_pos'][:, 1] + y_offset + center_y_offset
-                    
-                    placed = True
-                    break
-            if placed:
-                break
-                
-        if not placed:
-            print(f"Warning: Could not fit component of size {w}x{h}!")
+                new_pos[comp['indices'], 0] = comp['shifted_pos'][:, 0] + x_offset + center_x_offset
+                new_pos[comp['indices'], 1] = comp['shifted_pos'][:, 1] + y_offset + center_y_offset
+            break
+        else:
+            # Increase grid size and retry
+            S = int(S * 1.1) + 2
             
     # --- 5. Center the final visualization ---
     global_min = np.min(new_pos, axis=0)
@@ -654,7 +699,8 @@ def calculate_layout(connectivity, n_nodes, params):
     final_pos, final_box_limit = pack_components_to_grid(
         final_pos, edges, n_nodes, 
         params.get('PACKING_GRID_SIZE', 200.0), 
-        params.get('PACKING_PADDING', 50.0)
+        params.get('PACKING_PADDING', 50.0),
+        params.get('PACKING_GEOMETRY', 'Square')
     )
     
     return final_pos, final_box_limit
