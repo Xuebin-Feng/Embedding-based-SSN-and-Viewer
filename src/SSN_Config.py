@@ -4,8 +4,8 @@ import os
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
 
 # --- Placeholder Parameters ---
-SEQUENCE_SET = None
-ALIGNMENT_REFERENCE = None
+SEQUENCE_SET = ""
+ALIGNMENT_REFERENCE = ""
 SIMILARITY_THRESHOLD = None
 TOP_EDGE_PERCENT = None    
 ALIGNMENT_SCORE = None
@@ -26,17 +26,18 @@ FASTA_SPLIT_DIR = os.path.join("Cache_Files", "FASTA_Split")
 CLUSTER_LABEL_DIR = os.path.join("Results", "Cluster_Label")
 HEADER_LIST_DIR = os.path.join("Cache_Files", "Header_Lists")
 LOGO_DIR = os.path.join("Results", "Sequence_Logos")
+STRUCTURES_DIR = os.path.join("Cache_Files", "Structures")
 
 # --- Explicit Input File Paths ---
 # You can manually replace these string paths to decouple file logic:
-NODE_FASTA_FILE = os.path.join("Input_Files", "Sequence_Sets", f"{SEQUENCE_SET}.fasta")
+NODE_FASTA_FILE = ""
 
 # Default values if scanning directories fails:
-MSA_FILE = os.path.join(MSA_DIR, f"{SEQUENCE_SET}_[E1_RA]_alignment.fasta")
-INPUT_HDF5 = os.path.join("Input_Files", "Networks_EValues", f"{SEQUENCE_SET}_[E1_RA]_network.h5")
+MSA_FILE = ""
+INPUT_HDF5 = ""
 
 # Sequences File points to NODE_FASTA_FILE for backward compatibility
-SEQUENCES_FILE = NODE_FASTA_FILE
+SEQUENCES_FILE = ""
 
 # --- Command Settings ---
 GAP_CHARS = ['-', '.']
@@ -99,7 +100,7 @@ if os.path.exists(SETTINGS_FILE):
             for k, v in viewer_settings.items():
                 if k in LEGACY_KEYS_MAPPING:
                     k = LEGACY_KEYS_MAPPING[k]
-                if k in globals() and v is not None and str(v).strip() != "":
+                if k in globals() and v is not None and (str(v).strip() != "" or k in ["MSA_FILE", "ALIGNMENT_REFERENCE"]):
                     orig = globals()[k]
                     if isinstance(orig, int) and not isinstance(orig, bool):
                         try: v = int(v)
@@ -122,6 +123,11 @@ if os.path.exists(SETTINGS_FILE):
                 if "NODE_FASTA_FILE" in globals() and globals()["NODE_FASTA_FILE"]:
                     globals()["SEQUENCES_FILE"] = globals()["NODE_FASTA_FILE"]
                     globals()["SEQUENCE_SET"] = os.path.splitext(os.path.basename(globals()["NODE_FASTA_FILE"]))[0]
+                    # Also update default fallback paths if they still contain "None" or are empty after SEQUENCE_SET is resolved
+                    if globals().get("MSA_FILE") and "none_[e1_ra]_alignment.fasta" in globals()["MSA_FILE"].lower():
+                        globals()["MSA_FILE"] = os.path.join(globals()["MSA_DIR"], f"{globals()['SEQUENCE_SET']}_[E1_RA]_alignment.fasta")
+                    if not globals().get("INPUT_HDF5") or "none_[e1_ra]_network.h5" in globals()["INPUT_HDF5"].lower():
+                        globals()["INPUT_HDF5"] = os.path.join(globals()["HDF5_DIR"], f"{globals()['SEQUENCE_SET']}_[E1_RA]_network.h5")
                     
     except Exception as e:
         print(f"Failed to load viewer settings: {e}")
@@ -478,6 +484,7 @@ if __name__ == "__main__":
                 "CLUSTER_LABEL_DIR": "Directory where exported cluster metadata, sequence IDs, and automatically generated label descriptions are saved.\nUseful for downstream annotation pipelines or manual network inspection.",
                 "HEADER_LIST_DIR": "Directory containing text files with lists of sequence headers matching specific network filtering or query criteria.\nUsed to keep track of interesting sequence cohorts identified in the visualizer.",
                 "LOGO_DIR": "Directory where exported sequence logos (representing positional consensus sequence conservation) are saved.\nTypically saved in PNG or vector format for research publication and presentation.",
+                "STRUCTURES_DIR": "Directory where ESMFold predicted 3D structures and PDB files are stored.",
                 "TARGET_CACHE_FILE": "Selects a specific saved network coordinate cache file from the target directory to load into the visualizer.\nAllows restoring previous layout configurations or comparing different layout iterations directly.",
                 "NEW_CACHE_NAME": "Specifies a custom filename when saving a new layout configuration iteration.\nOnly editable when the 'Selected Cache File' dropdown is set to '(New Layout Cache)'."
             }
@@ -577,8 +584,9 @@ if __name__ == "__main__":
             seq_dir = globals().get("FASTA_DIR", os.path.join("Input_Files", "Sequence_Sets"))
             fasta_files = [f for f in os.listdir(seq_dir) if f.endswith('.fasta')] if os.path.exists(seq_dir) else []
             self.cb_fasta.addItems([""] + fasta_files)
-            if os.path.basename(globals().get("NODE_FASTA_FILE", "")) in fasta_files:
-                self.cb_fasta.setCurrentText(os.path.basename(globals().get("NODE_FASTA_FILE", "")))
+            fasta_val = globals().get("NODE_FASTA_FILE") or ""
+            if os.path.basename(fasta_val) in fasta_files:
+                self.cb_fasta.setCurrentText(os.path.basename(fasta_val))
             add_row_with_dynamic_btn("NODE_FASTA_FILE", "Sequence Set / Subset (.fasta):", self.cb_fasta, "FASTA_DIR", seq_dir)
             
             # --- MSA Input ---
@@ -586,8 +594,9 @@ if __name__ == "__main__":
             msa_dir_path = globals().get("MSA_DIR", os.path.join("Input_Files", "Multiple_Alignments"))
             msa_files = [f for f in os.listdir(msa_dir_path) if f.endswith('.fasta') or f.endswith('.h5')] if os.path.exists(msa_dir_path) else []
             self.cb_msa.addItems([""] + msa_files)
-            if os.path.basename(globals().get("MSA_FILE", "")) in msa_files:
-                self.cb_msa.setCurrentText(os.path.basename(globals().get("MSA_FILE", "")))
+            msa_val = globals().get("MSA_FILE") or ""
+            if os.path.basename(msa_val) in msa_files:
+                self.cb_msa.setCurrentText(os.path.basename(msa_val))
             add_row_with_dynamic_btn("MSA_FILE", "MSA Input (.fasta / _sparse.h5):", self.cb_msa, "MSA_DIR", msa_dir_path)
 
             # --- HDF5 Input ---
@@ -595,8 +604,9 @@ if __name__ == "__main__":
             hdf5_dir = globals().get("HDF5_DIR", os.path.join("Input_Files", "Networks_EValues"))
             hdf5_files = [f for f in os.listdir(hdf5_dir) if f.endswith('.h5')] if os.path.exists(hdf5_dir) else []
             self.cb_hdf5.addItems([""] + hdf5_files)
-            if os.path.basename(globals().get("INPUT_HDF5", "")) in hdf5_files:
-                self.cb_hdf5.setCurrentText(os.path.basename(globals().get("INPUT_HDF5", "")))
+            hdf5_val = globals().get("INPUT_HDF5") or ""
+            if os.path.basename(hdf5_val) in hdf5_files:
+                self.cb_hdf5.setCurrentText(os.path.basename(hdf5_val))
             add_row_with_dynamic_btn("INPUT_HDF5", "Network Edges Input (.h5):", self.cb_hdf5, "HDF5_DIR", hdf5_dir)
             
             # --- Rest of Inputs ---
@@ -1922,7 +1932,7 @@ if __name__ == "__main__":
             
             # Added FASTA_DIR and HDF5_DIR
             keys = ["FASTA_DIR", "MSA_DIR", "HDF5_DIR", "SAVED_LAYOUT_DIR", "METADATA_DIR", "PRINT_SAVE_DIR", 
-                    "FASTA_SPLIT_DIR", "CLUSTER_LABEL_DIR", "HEADER_LIST_DIR", "LOGO_DIR"]
+                    "FASTA_SPLIT_DIR", "CLUSTER_LABEL_DIR", "HEADER_LIST_DIR", "LOGO_DIR", "STRUCTURES_DIR"]
             
             for key in keys:
                 container = QWidget()
@@ -1987,6 +1997,7 @@ if __name__ == "__main__":
                 
                 if not str(val).strip(): 
                     if key == "TOP_EDGE_PERCENT": val = "None"
+                    elif key in ["MSA_FILE", "ALIGNMENT_REFERENCE"]: val = ""
                     else: continue
                 
                 if key == "NODE_FASTA_FILE": val = os.path.join(self.inputs["FASTA_DIR"].text(), val).replace("\\", "/") if val else ""

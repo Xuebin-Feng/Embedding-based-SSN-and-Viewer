@@ -1219,7 +1219,7 @@ class MainViewer:
         scale = getattr(self.canvas, 'pixel_scale', 1.0)
         
         self.instr_text = scene.visuals.Text(
-            text="[ENTER] Command | [LeftClick] Highlight | [RightClick] Select/Clear | [Scroll] Zoom | [Shift + LeftClick] Copy Node Header | [LeftClick + Drag] Pan | [RightClick + Drag] GroupSelect/MoveNodes",
+            text="[ENTER] Command | [LeftClick] Highlight | [RightClick] Select/Clear | [Scroll] Zoom | [LeftClick + Shift/Ctrl] Copy Node Header/Sequence | [LeftClick + Drag] Pan | [RightClick + Drag] GroupSelect/MoveNodes",
             bold=False, 
             font_size=8, 
             color='gray', 
@@ -1559,6 +1559,60 @@ class MainViewer:
                     self.console_text.text = f"Copy Failed: {full_header}"
                     print(f"Clipboard Error: {e}")
                 
+            event.handled = True
+            return
+        
+        # ---> 2.5 CONTROL + LEFT-CLICK LOGIC (Copy Sequence to Clipboard) <---
+        # Vispy Button 1 = Left Click
+        if event.button == 1 and ('Control' in event.modifiers or 'Meta' in event.modifiers) and not self.console_mode:
+            tr = self.canvas.scene.node_transform(self.view.scene)
+            mouse_world = tr.map(event.pos)[:2]
+            
+            dists = np.linalg.norm(self.pos[:, :2] - mouse_world, axis=1)
+            dists[~self.visible_mask] = np.inf
+            nearest_idx = np.argmin(dists)
+            
+            node_screen_pos = tr.inverse.map(self.pos[nearest_idx])[:2]
+            screen_dist = np.linalg.norm(node_screen_pos - event.pos)
+            
+            if screen_dist < (cfg.NODE_SIZE / 1.5):
+                full_header = self.full_headers[nearest_idx]
+                rec_id = full_header.split()[0]
+                
+                # Lazy-load sequence map if not already loaded
+                if not hasattr(self, 'sequences_map'):
+                    self.sequences_map = {}
+                    fasta_path = getattr(cfg, 'NODE_FASTA_FILE', None) or getattr(cfg, 'SEQUENCES_FILE', '')
+                    if fasta_path and os.path.exists(fasta_path):
+                        try:
+                            from Bio import SeqIO
+                            for rec in SeqIO.parse(fasta_path, "fasta"):
+                                self.sequences_map[rec.id] = str(rec.seq)
+                                self.sequences_map[rec.description] = str(rec.seq)
+                        except Exception as e:
+                            print(f"Warning: Failed to parse FASTA for sequences: {e}")
+                
+                # Look up sequence
+                sequence = None
+                if full_header in self.sequences_map:
+                    sequence = self.sequences_map[full_header]
+                elif rec_id in self.sequences_map:
+                    sequence = self.sequences_map[rec_id]
+                
+                if sequence:
+                    try:
+                        from vispy import app as vispy_app
+                        native_app = vispy_app.use_app().native
+                        native_app.clipboard().setText(sequence)
+                        self.console_text.text = f"Copied sequence of: {rec_id}"
+                        print(f"Copied sequence to clipboard: {rec_id} ({len(sequence)} aa)")
+                    except Exception as e:
+                        self.console_text.text = f"Copy Failed: {rec_id}"
+                        print(f"Clipboard Error: {e}")
+                else:
+                    self.console_text.text = f"Sequence not found for: {rec_id}"
+                    print(f"Sequence not found in FASTA for: {rec_id}")
+                    
             event.handled = True
             return
         

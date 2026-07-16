@@ -326,19 +326,6 @@ def normalize_score(raw_score, align_len, len_i, len_j, mode):
 
 def plot_score_histogram(scores, threshold):
     print("Displaying Score Histogram... (Close histogram to continue)")
-    
-    # --- OPTIMIZATION: Downsample for Speed ---
-    # If the dataset is massive (e.g., > 1 million edges), we sample it.
-    # This prevents the "huge lag" when plotting 100M+ points.
-    if len(scores) > 1_000_000:
-        print(f"  > Dataset too large ({len(scores)}). Subsampling to 1,000,000 for plotting... (Close histogram to continue)")
-        if isinstance(scores, list):
-            import random
-            scores = random.sample(scores, 1_000_000)
-        else:
-            # If it's already a numpy array
-            scores = np.random.choice(scores, 1_000_000, replace=False)
-    # ------------------------------------------
 
     plt.figure(figsize=(10, 6))
     plt.hist(scores, bins=100, color='#4488ff', edgecolor='black', alpha=0.7)

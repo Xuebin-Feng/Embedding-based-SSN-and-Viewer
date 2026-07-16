@@ -166,7 +166,10 @@ def calculate_file_hash(file_path):
 def compute_score_matrix_torch(emb_i, emb_j, device):
     t_i = torch.as_tensor(emb_i, device=device, dtype=torch.float16)
     t_j = torch.as_tensor(emb_j, device=device, dtype=torch.float16)
-    dist_mat = torch.cdist(t_i, t_j, p=2)
+    t_i_norm = torch.nn.functional.normalize(t_i, p=2, dim=-1)
+    t_j_norm = torch.nn.functional.normalize(t_j, p=2, dim=-1)
+    cos_sim = torch.mm(t_i_norm, t_j_norm.T)
+    dist_mat = 1.0 - cos_sim
     sim_mat = torch.exp(-dist_mat)
     
     epsilon = 1e-8

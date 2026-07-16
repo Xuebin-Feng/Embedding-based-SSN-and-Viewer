@@ -23,7 +23,7 @@ Settings:
 
 Algorithm:
 1. Loads pairs of embeddings dynamically from the input HDF5 file.
-2. Computes a similarity matrix between the two embeddings using PyTorch (`cdist` Euclidean distance converted to exponential similarity, followed by Z-score standardization across rows and columns).
+2. Computes a similarity matrix between the two embeddings using PyTorch (L2-normalized cosine distance converted to exponential similarity, followed by Z-score standardization across rows and columns).
 3. Evaluates both a Global Alignment (run_global_traceback) and a Local Alignment (run_local_traceback) utilizing Numba compiled JIT functions for speed. 
 4. Batches results sequentially into temporary pickle files.
 5. Merges all batches into optimized final HDF5 datasets.
@@ -159,7 +159,10 @@ def calculate_file_hash(file_path):
 def compute_score_matrix_torch(emb_i, emb_j, device):
     t_i = torch.as_tensor(emb_i, device=device, dtype=torch.float32)
     t_j = torch.as_tensor(emb_j, device=device, dtype=torch.float32)
-    dist_mat = torch.cdist(t_i, t_j, p=2)
+    t_i_norm = torch.nn.functional.normalize(t_i, p=2, dim=-1)
+    t_j_norm = torch.nn.functional.normalize(t_j, p=2, dim=-1)
+    cos_sim = torch.mm(t_i_norm, t_j_norm.T)
+    dist_mat = 1.0 - cos_sim
     sim_mat = torch.exp(-dist_mat)
     
     epsilon = 1e-8

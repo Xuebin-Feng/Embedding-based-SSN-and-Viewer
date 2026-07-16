@@ -6,6 +6,7 @@ import h5py
 import numpy as np
 import json
 import SSN_Utils as utils
+import SSN_Config as cfg
 
 def run(viewer, args):
     if args and args[0].lower() in ['help', '-h', '--help']:

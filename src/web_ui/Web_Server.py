@@ -5,6 +5,22 @@ import json
 import os
 from PyQt6 import QtCore
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        try:
+            import numpy as np
+            if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
+        except ImportError:
+            pass
+        return super().default(obj)
+
 class QtCommunicator(QtCore.QObject):
     action_signal = QtCore.pyqtSignal(dict)
     
@@ -134,13 +150,13 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         try:
             # Send initial configuration
             initial_data = self.server.viewer.get_initial_web_state()
-            self.wfile.write(f"data: {json.dumps({'type': 'init', 'data': initial_data})}\n\n".encode('utf-8'))
+            self.wfile.write(f"data: {json.dumps({'type': 'init', 'data': initial_data}, cls=NumpyEncoder)}\n\n".encode('utf-8'))
             self.wfile.flush()
             
             while True:
                 try:
                     event = q.get(timeout=1.0)
-                    self.wfile.write(f"data: {json.dumps(event)}\n\n".encode('utf-8'))
+                    self.wfile.write(f"data: {json.dumps(event, cls=NumpyEncoder)}\n\n".encode('utf-8'))
                     self.wfile.flush()
                 except queue.Empty:
                     # Send a keep-alive ping to prevent timeouts
@@ -164,7 +180,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"status": "ok"}).encode('utf-8'))
+                self.wfile.write(json.dumps({"status": "ok"}, cls=NumpyEncoder).encode('utf-8'))
             except Exception as e:
                 self.send_response(500)
                 self.end_headers()

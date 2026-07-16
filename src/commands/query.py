@@ -24,7 +24,8 @@ def print_help():
 
     Syntax & Targets:
       1. Positions:  Comma-separated list or ranges enclosed in brackets. 
-                     Accepts decimal positions. Example: [10, 15.1, 20-30]
+                     Accepts decimal positions, and 'E' or 'END' for the last residue.
+                     Example: [10, 15.1, 20-30, 250-E, END]
       2. Expression: Boolean logic (e.g., #cluster_1#, "ATA", or $sele$).
                      Do NOT use spaces inside your logical expression.
 
@@ -194,8 +195,13 @@ def run(viewer, args):
             pass
     valid_labels.sort(key=lambda x: x[0])
 
+    max_val = valid_labels[-1][0] if valid_labels else (0, 0)
+
     def parse_to_tuple(s):
-        p = str(s).split('.')
+        s_clean = str(s).strip().upper()
+        if s_clean in ["E", "END"]:
+            return max_val
+        p = s_clean.split('.')
         return (int(p[0]), int(p[1]) if len(p) > 1 else 0)
 
     for part in parsed_args:
@@ -212,8 +218,14 @@ def run(viewer, args):
                 if part not in expanded_positions:
                     expanded_positions.append(part)
         else:
-            if part not in expanded_positions:
-                expanded_positions.append(part)
+            part_clean = part.strip().upper()
+            if part_clean in ["E", "END"] and valid_labels:
+                last_lbl = valid_labels[-1][1]
+                if last_lbl not in expanded_positions:
+                    expanded_positions.append(last_lbl)
+            else:
+                if part not in expanded_positions:
+                    expanded_positions.append(part)
 
     # --- 5. Query the Matrix ---
     for pos in expanded_positions:

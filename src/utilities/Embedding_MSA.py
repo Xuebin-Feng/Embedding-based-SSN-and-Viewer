@@ -35,7 +35,7 @@ Algorithm:
 4. Computes the geometric average (consensus) graph of all random bootstraps to form the master guide tree.
 5. In ascending order of linkage closeness, extracts sequence pairs/groups.
 6. Averages the numerical embedding vectors of groups utilizing sequence-length mathematical weights.
-7. Aligns the resultant averaged arrays using Needleman-Wunsch dynamic programming and PyTorch CDist evaluation.
+7. Aligns the resultant averaged arrays using Needleman-Wunsch dynamic programming and PyTorch Cosine Distance evaluation.
 8. Distributes the calculated optimal gap padding into all underlying string literal FASTA sequences.
 9. Saves the final alignment block.
 """
@@ -254,7 +254,10 @@ def load_fasta_map(filepath):
 def compute_score_matrix_torch(emb_i, emb_j):
     t_i = torch.as_tensor(emb_i, device=DEVICE, dtype=torch.float32)
     t_j = torch.as_tensor(emb_j, device=DEVICE, dtype=torch.float32)
-    dist_mat = torch.cdist(t_i, t_j, p=2)
+    t_i_norm = torch.nn.functional.normalize(t_i, p=2, dim=-1)
+    t_j_norm = torch.nn.functional.normalize(t_j, p=2, dim=-1)
+    cos_sim = torch.mm(t_i_norm, t_j_norm.T)
+    dist_mat = 1.0 - cos_sim
     sim_mat = torch.exp(-dist_mat)
     
     epsilon = 1e-8

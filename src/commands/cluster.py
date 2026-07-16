@@ -19,7 +19,7 @@ def get_colored_cluster_name(cid, name_str, color_map=None):
         r, g, b = int(rgba[0] * 255), int(rgba[1] * 255), int(rgba[2] * 255)
     else:
         r, g, b = 180, 180, 180
-    return f"\033[38;2;{r};{g};{b}m{name_str}\033[0m"
+    return f"\033[38;2;{r};{g};{b}m●\033[0m {name_str}"
 
 def get_combined_colors(n_clusters):
     if n_clusters <= 0:
@@ -110,11 +110,11 @@ def run(viewer, args):
         noise_colored = get_colored_cluster_name(-1, "Noise (Unclustered)", color_map)
         print(f"{noise_colored}: {noise_count} nodes ({noise_count/n_nodes*100:.2f}%)")
         
-        print(f"\n{'='*52}")
+        print(f"\n{'='*54}")
         print(f"--- Current Cluster Statistics (Total: {n_nodes}) ---")
-        print(f"{'='*52}")
-        print(f"| {'Cluster Name':<20} | {'Node Count':>10} | {'Percent':>10} |")
-        print(f"|{'-'*22}+{'-'*12}+{'-'*12}|")
+        print(f"{'='*54}")
+        print(f"| {'Cluster Name':<22} | {'Node Count':>10} | {'Percent':>10} |")
+        print(f"|{'-'*24}+{'-'*12}+{'-'*12}|")
         
         noise_count = label_counts.get(-1, 0)
         noise_pct = (noise_count / n_nodes) * 100
@@ -126,7 +126,7 @@ def run(viewer, args):
             c_pct = (c_count / n_nodes) * 100
             c_name_padded = get_colored_cluster_name(cid, f"{f'Cluster {cid}':<20}", color_map)
             print(f"| {c_name_padded} | {c_count:>10} | {c_pct:>9.2f}% |")
-        print(f"{'='*52}\n")
+        print(f"{'='*54}\n")
         
         msg = f"Listed {len(sorted_clusters)} clusters in console."
         viewer.console_text.text = msg
@@ -209,7 +209,7 @@ def run(viewer, args):
 
         # BFS Connected Components
         visited = np.zeros(n_nodes, dtype=bool)
-        cluster_id = 0
+        cluster_id = 1
         
         for i in range(n_nodes):
             if not visited[i]:
@@ -266,7 +266,7 @@ def run(viewer, args):
         result = mc.run_mcl(matrix, inflation=inflation)
         clusters = mc.get_clusters(result)
         
-        cluster_id = 0
+        cluster_id = 1
         for comp in clusters:
             if len(comp) >= min_sz:
                 for node in comp:
@@ -299,7 +299,7 @@ def run(viewer, args):
             print(f"Running Leiden (Resolution = {resolution}, Unweighted).")
             partition = la.find_partition(G, la.RBConfigurationVertexPartition, resolution_parameter=resolution)
             
-        cluster_id = 0
+        cluster_id = 1
         for comp in partition:
             if len(comp) >= min_sz:
                 for node in comp:
@@ -339,11 +339,11 @@ def run(viewer, args):
     unique_labels, counts = np.unique(labels, return_counts=True)
     label_counts = dict(zip(unique_labels, counts))
     
-    print(f"\n{'='*52}")
+    print(f"\n{'='*54}")
     print(f"--- {mode.upper()} Clustering Stats (Total Nodes: {n_nodes}) ---")
-    print(f"{'='*52}")
-    print(f"| {'Cluster Name':<20} | {'Node Count':>10} | {'Percent':>10} |")
-    print(f"|{'-'*22}+{'-'*12}+{'-'*12}|")
+    print(f"{'='*54}")
+    print(f"| {'Cluster Name':<22} | {'Node Count':>10} | {'Percent':>10} |")
+    print(f"|{'-'*24}+{'-'*12}+{'-'*12}|")
     
     noise_count = label_counts.get(-1, 0)
     noise_pct = (noise_count / n_nodes) * 100
@@ -356,7 +356,7 @@ def run(viewer, args):
         c_pct = (c_count / n_nodes) * 100
         c_name_padded = get_colored_cluster_name(cid, f"{f'Cluster {cid}':<20}", color_map)
         print(f"| {c_name_padded} | {c_count:>10} | {c_pct:>9.2f}% |")
-    print(f"{'='*52}\n")
+    print(f"{'='*54}\n")
     
     n_clusters = len(sorted_clusters)
     msg = f"Done! Found {n_clusters} clusters via {mode.upper()}."

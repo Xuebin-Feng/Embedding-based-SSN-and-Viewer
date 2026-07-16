@@ -60,10 +60,13 @@ The alignment pipeline is executed in the following steps:
      Pairs scoring in the bottom percentile corresponding to `PREFILTER_STRENGTH` are skipped.
 
 3. **Residue-Level Similarity Matrix Computation**:
-     For each sequence pair $(i, j)$ passing the pre-filter, a pairwise Euclidean distance matrix is computed:
-     $$D(a, b) = \|v_i(a) - v_j(b)\|_2$$
+     For each sequence pair $(i, j)$ passing the pre-filter, a pairwise Cosine distance matrix is computed. First, the residue embeddings are L2-normalized along the hidden dimension:
+     $$\hat{v}_i(a) = \frac{v_i(a)}{\|v_i(a)\|_2}$$
      
-     where $v_i(a)$ is the embedding vector for residue $a$ in sequence $i$. This is converted into a similarity matrix:
+     Then, the cosine distance is calculated using matrix multiplication:
+     $$D(a, b) = 1.0 - \hat{v}_i(a) \cdot \hat{v}_j(b)$$
+     
+     where $v_i(a)$ is the embedding vector for residue $a$ in sequence $i$. This distance is converted into a similarity matrix:
      $$S(a, b) = \exp(-D(a, b))$$
 
 4. **Dual Z-Score Normalization**:

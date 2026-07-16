@@ -11,13 +11,13 @@ MAX_CORES = os.cpu_count() or 16
 
 def get_supported_embedding_models():
     """
-    Scans the src/resources/embedding_models/ folder and parses all scripts
+    Scans the src/resources/pLM_models/ folder and parses all scripts
     statically via AST to dynamically build the list of supported embedding models.
     """
     import glob
     models = []
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    plugin_dir = os.path.join(current_dir, "resources", "embedding_models")
+    plugin_dir = os.path.join(current_dir, "resources", "pLM_models")
     if os.path.exists(plugin_dir):
         for filepath in glob.glob(os.path.join(plugin_dir, "*.py")):
             if os.path.basename(filepath) == "__init__.py":
@@ -1185,8 +1185,10 @@ class ToolsGUI(QMainWindow):
         self.right_panel = QVBoxLayout(self.right_widget)
         self.splitter.addWidget(self.right_widget)
         
-        self.splitter.setStretchFactor(0, 2)
-        self.splitter.setStretchFactor(1, 1)
+        # Set initial partition to 70% main panel (left) and 30% side panel (right)
+        self.splitter.setSizes([70, 30])
+        self.splitter.setStretchFactor(0, 7)
+        self.splitter.setStretchFactor(1, 3)
         
         self.desc_title = QLabel("Script Description")
         self.desc_title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 5px;")

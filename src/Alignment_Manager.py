@@ -15,6 +15,10 @@ class Alignment_Manager:
         self.label_to_col = None
         self.resolved_ref_full = None
 
+        if not msa_file or str(msa_file).strip() == "" or str(msa_file).strip().lower() == "none" or "none_[e1_ra]_alignment.fasta" in str(msa_file).lower():
+            print("An MSA is not selected and will not be loaded.")
+            return
+
         self.aln, is_sparse = load_alignment_smart(msa_file, filter_headers=full_headers)
         if self.aln is None:
             print('Warning: Failed to load alignment.')
@@ -367,6 +371,9 @@ def load_alignment_smart(msa_path, filter_headers=None):
     - .h5: Loads the pre-computed sparse matrix from disk.
     - .fasta: Converts the FASTA to a sparse matrix directly in RAM.
     """
+    if not msa_path or str(msa_path).strip() == "" or str(msa_path).strip().lower() == "none":
+        return None, False
+
     if msa_path.endswith(".h5"):
         if os.path.exists(msa_path):
             print(f"--- Loading Sparse Alignment in HDF5 format: {msa_path} ---")

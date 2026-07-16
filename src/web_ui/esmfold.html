@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESMFold Mol* Viewer</title>
+    <!-- Load MolStar CSS and JS locally -->
+    <link rel="stylesheet" type="text/css" href="/esmfold/molstar.css" />
+    <script type="text/javascript" src="/esmfold/molstar.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #111;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        #viewer {
+            width: 100%;
+            height: 100%;
+        }
+        #status-bar {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="viewer"></div>
+    <div id="status-bar">Initializing Mol*...</div>
+
+    <script>
+        let plugin;
+        let viewerInstance;
+        let isRestoring = true;
+        let pendingStructures = [];
+        const statusBar = document.getElementById('status-bar');
+
+        function showStatus(text, duration = 3000) {
+            statusBar.textContent = text;
+            statusBar.style.display = 'block';
+            if (duration > 0) {
+                setTimeout(() => {
+                    statusBar.style.display = 'none';
+                }, duration);
+            }
+        }
+
+        // Initialize Mol* viewer
+        molstar.Viewer.create('viewer', {
+            layoutIsExpanded: false,
+            layoutShowControls: true,
+            layoutShowSequence: true
+        }).then(v => {
+            viewerInstance = v;
+            plugin = v.plugin;
+            showStatus("Mol* initialized. Connecting to visualizer...");
+            setupSSE();
+        });
+
+        // Request session load from python server
+        function requestSessionLoad() {
+            fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'load_molstar_session' })
+            }).catch(err => {
+                console.error("Failed to load session:", err);
+                showStatus("Connection error: could not fetch session.");
+            });
+        }
+
+        // Setup SSE connection to listen for events
+        function setupSSE() {
+            const sse = new EventSource('/api/events');
+            
+            // Backup safety timeout for session restore handshake
+            setTimeout(() => {
+                if (isRestoring) {
+                    console.warn("Session restore handshake timed out; proceeding with fresh session.");
+                    isRestoring = false;
+                    processPendingStructures();
+                }
+            }, 4000);
+
+            async function processPendingStructures() {
+                for (const struct of pendingStructures) {
+                    showStatus(`Processing queued structure: ${struct.node_id}...`, 0);
+                    await loadAndAlignStructure(struct.pdb_url, struct.node_id);
+                }
+                pendingStructures = [];
+            }
+
+            sse.onmessage = async (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    
+                    if (msg.type === 'restore_session') {
+                        if (isRestoring) {
+                            if (msg.session) {
+                                showStatus("Restoring saved Mol* session...");
+                                await plugin.state.setSnapshot(msg.session);
+                                showStatus("Session restored successfully.");
+                            } else {
+                                showStatus("Started with a fresh blank session.");
+                            }
+                            isRestoring = false;
+                            await processPendingStructures();
+                        }
+                    } else if (msg.type === 'esmfold_pdb') {
+                        const { pdb_url, node_id } = msg;
+                        if (isRestoring) {
+                            // Queue incoming structure while waiting for the session state response
+                            pendingStructures.push({ pdb_url, node_id });
+                        } else {
+                            showStatus(`New structure received: ${node_id}. Loading...`, 0);
+                            await loadAndAlignStructure(pdb_url, node_id);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error processing SSE message:", e);
+                }
+            };
+
+            sse.onopen = () => {
+                requestSessionLoad();
+            };
+
+            sse.onerror = (err) => {
+                console.error("SSE Connection Error:", err);
+                showStatus("Lost connection to SSN Viewer. Retrying...");
+            };
+        }
+
+        // Load structure, apply cartoon/pLDDT coloring, align to pivot, and auto-save
+        async function loadAndAlignStructure(url, label) {
+            try {
+                showStatus(`Loading structure ${label}...`, 0);
+                plugin.log.info(`Loading structure ${label}...`);
+                
+                // Use the official high-level loadStructureFromUrl method
+                await viewerInstance.loadStructureFromUrl(url, 'pdb');
+                
+                // Apply pLDDT confidence coloring to all loaded structures
+                const structures = plugin.managers.structure.hierarchy.current.structures;
+                for (const s of structures) {
+                    const components = s.components;
+                    try {
+                        await plugin.managers.structure.component.updateRepresentationsTheme(components, {
+                            color: 'plddt-confidence'
+                        });
+                    } catch (e1) {
+                        try {
+                            await plugin.managers.structure.component.updateRepresentationsTheme(components, {
+                                colorTheme: { name: 'plddt-confidence' }
+                            });
+                        } catch (e2) {
+                            console.warn("Failed to apply pLDDT theme:", e1, e2);
+                        }
+                    }
+                }
+                if (structures.length > 1) {
+                    showStatus(`Aligning ${label} to pivot structure...`, 0);
+                    plugin.log.info(`Aligning ${label} to pivot structure...`);
+                    const pivot = structures[0];
+                    const target = [structures[structures.length - 1]];
+                    
+                    // Call the built-in structural superposition/alignment manager if supported
+                    try {
+                        await plugin.managers.structure.orientation.align(target, { pivot: pivot });
+                        showStatus(`Loaded and aligned ${label}.`);
+                        plugin.log.info(`Successfully loaded and aligned ${label}.`);
+                    } catch (alignErr) {
+                        console.warn("Structural alignment skipped/failed: ", alignErr);
+                        plugin.log.warn(`Structural alignment skipped/failed: ${alignErr.message}`);
+                        showStatus(`Loaded ${label}.`);
+                    }
+                } else {
+                    showStatus(`Loaded ${label} as the pivot structure.`);
+                    plugin.log.info(`Loaded ${label} as the pivot structure.`);
+                }
+            } catch (err) {
+                console.error("Error loading structure:", err);
+                plugin.log.error(`Error loading structure ${label}: ${err.message}`);
+                showStatus(`Failed to load structure ${label}.`);
+            } finally {
+                // Wait 1.5 seconds for representation state to finalize, then save session snapshot
+                setTimeout(saveSession, 1500);
+            }
+        }
+
+        // Save session state to layout cache
+        function saveSession() {
+            if (!plugin) return;
+            try {
+                const snapshot = plugin.state.getSnapshot();
+                
+                fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'save_molstar_session', session: snapshot })
+                }).then(response => {
+                    if (response.ok) {
+                        console.log("Mol* session snapshot auto-saved.");
+                    } else {
+                        console.error("Failed to auto-save session state.");
+                        fetch('/api/action', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'console_debug_err', error: "Failed to auto-save session state. Status: " + response.status })
+                        });
+                    }
+                }).catch(err => {
+                    console.error("Network error during auto-save:", err);
+                    fetch('/api/action', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'console_debug_err', error: "Network error during auto-save: " + (err.stack || err.message) })
+                    });
+                });
+            } catch (err) {
+                console.error("Serialization error during saveSession:", err);
+                fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'console_debug_err', error: "Serialization error during saveSession: " + (err.stack || err.message) })
+                });
+            }
+        }
+    </script>
+</body>
+</html>

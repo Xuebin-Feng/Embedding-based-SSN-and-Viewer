@@ -378,7 +378,10 @@ def run_alignment(header_ref, header_tar, seq_ref_manual, seq_tar_manual, h5_pat
     emb_ref = emb_ref.to(device)
     emb_tar = emb_tar.to(device)
 
-    dist_mat = torch.cdist(emb_ref, emb_tar)
+    emb_ref_norm = torch.nn.functional.normalize(emb_ref, p=2, dim=-1)
+    emb_tar_norm = torch.nn.functional.normalize(emb_tar, p=2, dim=-1)
+    cos_sim = torch.mm(emb_ref_norm, emb_tar_norm.T)
+    dist_mat = 1.0 - cos_sim
     sim_mat = torch.exp(-dist_mat)
     
     eps = 1e-8

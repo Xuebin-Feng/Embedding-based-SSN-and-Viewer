@@ -101,7 +101,7 @@ FULL_INPUT_FASTA = os.path.join(FASTA_DIR, INPUT_FASTA) if FASTA_DIR and INPUT_F
 SEQUENCE_SET = INPUT_FASTA.replace(".fasta", "") if INPUT_FASTA else "Unknown_Set"
 OUTPUT_HDF5 = os.path.join(EMBED_DIR, f"{SEQUENCE_SET}_[{MODEL_NAME}]_embeddings.h5") if EMBED_DIR else ""
 
-# Embedding model imports are deferred to dynamic plugin scripts under src/resources/embedding_models/
+# Embedding model imports are deferred to dynamic plugin scripts under src/resources/pLM_models/
 
 # Helper function
 def read_fasta(file_path):
@@ -144,7 +144,7 @@ def find_model_plugin(model_name):
     import importlib.util
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    plugin_dir = os.path.abspath(os.path.join(current_dir, "..", "resources", "embedding_models"))
+    plugin_dir = os.path.abspath(os.path.join(current_dir, "..", "resources", "pLM_models"))
 
     if not os.path.exists(plugin_dir):
         raise FileNotFoundError(f"Plugin directory not found: {plugin_dir}")
@@ -228,7 +228,7 @@ if __name__ == "__main__":
             # 4. Find and Load Model Plugin (Only if we actually have work to do!)
             plugin = find_model_plugin(MODEL_NAME)
             if plugin is None:
-                raise ValueError(f"Model '{MODEL_NAME}' is not supported by any available plugin in 'embedding_models'.")
+                raise ValueError(f"Model '{MODEL_NAME}' is not supported by any available plugin in 'pLM_models'.")
             
             device = Hardware_Utils.get_optimal_device()
             model_obj = plugin.load_model(MODEL_NAME, device)

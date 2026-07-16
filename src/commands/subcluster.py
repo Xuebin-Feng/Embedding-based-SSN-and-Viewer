@@ -219,7 +219,7 @@ def run(viewer, args):
 
         # BFS Connected Components
         visited = np.zeros(n_sub, dtype=bool)
-        sub_id = 0
+        sub_id = 1
         
         for i in range(n_sub):
             if not visited[i]:
@@ -271,7 +271,7 @@ def run(viewer, args):
         result = mc.run_mcl(matrix, inflation=inflation)
         clusters = mc.get_clusters(result)
         
-        sub_id = 0
+        sub_id = 1
         for comp in clusters:
             if len(comp) >= min_sz:
                 for node in comp:
@@ -300,7 +300,7 @@ def run(viewer, args):
         else:
             partition = la.find_partition(G, la.RBConfigurationVertexPartition, resolution_parameter=resolution)
             
-        sub_id = 0
+        sub_id = 1
         for comp in partition:
             if len(comp) >= min_sz:
                 for node in comp:
