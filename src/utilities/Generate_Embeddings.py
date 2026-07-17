@@ -213,7 +213,8 @@ if __name__ == "__main__":
         
         # Build a list of sequences that actually need to be generated
         for h, s in zip(headers, seqs):
-            if h not in existing_keys:
+            safe_h = h.replace("/", "_").replace("\\", "_")
+            if safe_h not in existing_keys:
                 pending_headers.append(h)
                 pending_seqs.append(s)
                 
@@ -236,7 +237,8 @@ if __name__ == "__main__":
             # 5. Generate & Save Loop
             for header, seq in tqdm(zip(pending_headers, pending_seqs), total=len(pending_headers), desc="Embedding"):
                 emb = plugin.get_embedding(seq, model_obj, device, target_dtype)
-                emb_group.create_dataset(header, data=emb)
+                safe_header = header.replace("/", "_").replace("\\", "_")
+                emb_group.create_dataset(safe_header, data=emb)
         
         # 6. Finalize Metadata (Overwriting to ensure the master list perfectly matches the current FASTA file)
         hf.attrs["model_name"] = MODEL_NAME

@@ -107,3 +107,61 @@ This script extracts sequence embeddings from pre-trained protein language model
      Saves each $E_{\text{residue}}$ dataset in the output HDF5 database using the sanitized header as the key. Slices values into the target precision (`float16` or `float32`). Writes a global `headers` index array and a `seq_lens` array to enable rapid database lookups.
 
 </details>
+
+---
+
+# ✂️ Embedding Cropping (`Embedding_Cropping.py`)
+
+This script produces embeddings for cropped/partial sequences by slicing them directly out of an existing full-sequence embedding database, instead of embedding the cropped fragment in isolation. Protein language models compute every residue's representation using full self-attention context, so directly embedding a short fragment yields a different (context-impoverished) vector than the same residues would get inside their native full-length sequence. This script never re-runs the language model — it only reads a full-sequence HDF5 database (produced by `Generate_Embeddings.py`) and slices out the requested residue range for each cropped sequence, preserving the full-context representation.
+
+### 📥 Input
+
+#### Full Embedding Database `INPUT_EMBED`
+*   **Format**: HDF5 embedding database (`.h5`).
+*   **Created By**: `Generate_Embeddings.py` (Embedding Generation utility), run on `FULL_FASTA`.
+
+#### Full Sequence Set `FULL_FASTA`
+*   **Format**: Standard FASTA (`.fasta`).
+*   **Description**: The full-length sequences that `INPUT_EMBED` was generated from. May contain more sequences than `CROPPED_FASTA` needs — extras are ignored.
+
+#### Cropped Sequence Set `CROPPED_FASTA`
+*   **Format**: Standard FASTA (`.fasta`).
+*   **Description**: Partial sequences to produce contextual embeddings for. Each header must also appear in `FULL_FASTA` and `INPUT_EMBED`, and each sequence must be an exact contiguous substring of its full-length counterpart.
+
+### ⚙️ Parameters
+
+This script does not require additional configuration parameters — behavior is fully determined by the three input files above.
+
+### 📤 Output
+
+#### HDF5 Embedding Database
+*   **Format**: HDF5 (`.h5`), named `{CROPPED_FASTA}_[{model_name}]_embeddings.h5` — identical in structure to what `Generate_Embeddings.py` would produce if run directly on `CROPPED_FASTA`, so it is a drop-in input for downstream tools (`Embedding_PWA.py`, `Embedding_SSEARCH.py`, `Embedding_MSA.py`, etc.).
+*   **Structure**:
+    - `/embeddings/{sanitized_header}`: Dataset of shape $L_{\text{crop}} \times D$, sliced from the full-length embedding.
+    - `/headers`: Array of resolved cropped-sequence headers.
+    - `attrs["model_name"]`, `attrs["num_sequences"]`.
+
+<details markdown="1">
+<summary><b>Algorithm Details</b></summary>
+
+1. **Header Correspondence**:
+     For each cropped sequence $s_{\text{crop}}$ with header $h$, locates the full sequence $s_{\text{full}}$ and full embedding matrix $E_{\text{full}} \in \mathbb{R}^{L_{\text{full}} \times D}$ sharing the same header $h$ in `FULL_FASTA` / `INPUT_EMBED`. Headers absent from either are reported and skipped.
+
+2. **Consistency Check**:
+     Verifies that the full embedding's row count matches the full sequence's length:
+     $$L_{\text{full}} \overset{?}{=} \text{Length}(s_{\text{full}})$$
+     A mismatch indicates `INPUT_EMBED` does not actually correspond to `FULL_FASTA` for that header, and the entry is skipped rather than sliced incorrectly.
+
+3. **Offset Resolution**:
+     Finds the position of the cropped sequence within its full parent via exact substring search:
+     $$\text{offset} = \arg\min \{ i : s_{\text{full}}[i : i+L_{\text{crop}}] = s_{\text{crop}} \}$$
+     If the crop occurs more than once, the first occurrence is used and a warning is logged. If it is not found at all, the header is skipped and reported.
+
+4. **Context-Preserving Slice**:
+     Because the residue embeddings in $E_{\text{full}}$ already account for full sequence context, slicing is a simple index range with no recomputation:
+     $$E_{\text{crop}} = E_{\text{full}}[\text{offset} : \text{offset} + L_{\text{crop}}]$$
+
+5. **HDF5 Database Compilation**:
+     Writes each $E_{\text{crop}}$ into the output database keyed by the sanitized cropped header, alongside a `headers` index array and `model_name`/`num_sequences` metadata — matching the standard embedding database structure.
+
+</details>
